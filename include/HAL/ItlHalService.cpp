@@ -23,6 +23,7 @@ initWithController(IOEthernetController *controller, IOWorkLoop *workloop, IOCom
 #ifdef AIRPORT_WCL
     auto ic = get80211Controller();
     ic->ic_wcl_scan_away_time_ms = 0;
+    ic->ic_wcl_join_channel = 0;
     bzero(ic->ic_wcl_tx_packets, sizeof(ic->ic_wcl_tx_packets));
     bzero(ic->ic_wcl_rx_packets, sizeof(ic->ic_wcl_rx_packets));
 #endif

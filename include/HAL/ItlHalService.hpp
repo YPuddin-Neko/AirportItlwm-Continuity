@@ -44,6 +44,8 @@ public:
     virtual IOReturn enable(IONetworkInterface *interface) = 0;
     
     virtual IOReturn disable(IONetworkInterface *interface) = 0;
+
+    virtual void resumeAdapter() {}
     
     virtual struct ieee80211com *get80211Controller() = 0;
 #ifdef AIRPORT_WCL

@@ -72,7 +72,7 @@ public:
     virtual UInt getBSDUnitNumber();
     virtual const char * classNameOverride();
     virtual void deferBSDAttach(bool);
-    virtual void reportDetailedLinkStatus(if_link_status const*);
+    virtual IOReturn reportDetailedLinkStatus(if_link_status const*);
     virtual UInt getTSOOptions(IOSkywalkNetworkInterface::IOSkywalkTSOOptions*);
     virtual void _RESERVEDIOSkywalkNetworkInterface0();
     virtual void _RESERVEDIOSkywalkNetworkInterface1();
@@ -85,6 +85,8 @@ public:
     virtual void _RESERVEDIOSkywalkNetworkInterface8();
     virtual void _RESERVEDIOSkywalkNetworkInterface9();
     void reportLinkStatus(unsigned int, unsigned int);
+    IOReturn reportLinkQuality(unsigned int);
+    void reportDataBandwidths(unsigned long long, unsigned long long, unsigned long long, unsigned long long);
     struct ExpansionData { RegistrationInfo *fRegistrationInfo; ifnet_t fBSDInterface; };
     uint8_t _layout0[0x8];
     ExpansionData *mExpansionData;

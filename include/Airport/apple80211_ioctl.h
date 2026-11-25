@@ -353,6 +353,7 @@ struct apple80211req
 #define APPLE80211_IOC_OFFLOAD_TCPKA_ENABLE 265
 #define APPLE80211_IOC_RANGING_CAPS 266
 #define APPLE80211_IOC_SUPPRESS_SCANS 267
+#define APPLE80211_IOC_COMPANION_SKYWALK_IF_CREATE 293
 #define APPLE80211_IOC_HOST_AP_MODE_HIDDEN 336
 #define APPLE80211_IOC_LQM_CONFIG 337
 #define APPLE80211_IOC_AWDL_CCA 338
@@ -910,6 +911,9 @@ struct apple80211_awdl_election_metric
 {
     uint32_t    version;
     uint32_t    metric;
+#if __IO80211_TARGET == __MAC_15_2
+    uint32_t    reserved;
+#endif
 } __attribute__((packed));
 
 struct apple80211_awdl_sync_enabled
@@ -975,6 +979,17 @@ struct apple80211_peer_cache_maximum_size {
     uint32_t    max_peers;
 } __attribute__((packed));
 
+#if __IO80211_TARGET == __MAC_15_2
+// 24H32: cache requests and APPLE80211_M_PEER_CACHE_CONTROL share this layout.
+struct apple80211_peer_cache_control {
+    uint32_t version;
+    uint32_t operation; // 0 add, 6 update, 2 delete; indications are 1 and 3.
+    uint8_t address[6];
+    uint16_t reserved;
+    uint8_t radio_parameters[448];
+} __attribute__((packed));
+#endif
+
 struct apple80211_awdl_election_id {
     uint32_t    version;
     uint32_t    election_id;
@@ -993,13 +1008,23 @@ struct apple80211_awdl_secondary_master_channel {
 struct apple80211_awdl_min_rate {
     uint32_t    version;
     uint8_t    min_rate;
+#if __IO80211_TARGET == __MAC_15_2
+    uint8_t    reserved[3];
+#endif
 } __attribute__((packed));
 
 struct apple80211_awdl_election_rssi_thresholds {
     uint32_t    version;
+#if __IO80211_TARGET == __MAC_15_2
+    int32_t     range_mid;
+    int32_t     range_close;
+    int32_t     sync_close;
+    int32_t     sync_edge;
+#else
     uint32_t    unk1;
     uint32_t    unk2;
     uint32_t    unk3;
+#endif
 } __attribute__((packed));
 
 struct apple80211_channel_sequence {
@@ -1015,11 +1040,22 @@ struct apple80211_awdl_sync_channel_sequence {
     uint8_t     step_count;         // 7
     uint8_t     duplicate_count;    // 8
     uint8_t     fill_channel;       // 9
+#if __IO80211_TARGET == __MAC_15_2
+    uint8_t     pad2[2];
+    struct apple80211_channel seqs[32];
+    uint32_t    reserved;
+#else
     uint8_t     pad2[6];
     struct apple80211_channel_sequence seqs[APPLE80211_MAX_CHANNELS];
+#endif
 } __attribute__((packed));
 
+#if __IO80211_TARGET == __MAC_15_2
+static_assert(__offsetof(apple80211_awdl_sync_channel_sequence, seqs) == 12, "Sequoia channel sequence offset");
+static_assert(sizeof(apple80211_channel) == 12, "Sequoia channel entry size");
+#else
 static_assert(__offsetof(apple80211_awdl_sync_channel_sequence, seqs) == 16, "seqs offset error");
+#endif
 
 static_assert(sizeof(struct apple80211_awdl_sync_channel_sequence) == 0x190, "apple80211_awdl_sync_channel_sequence struct corrupt");
 
@@ -1039,7 +1075,57 @@ struct apple80211_awdl_extension_state_machine_parameter {
 struct apple80211_awdl_sync_state {
     uint32_t    version;
     uint32_t    state;
+#if __IO80211_TARGET == __MAC_15_2
+    uint8_t     sync_master_addr[APPLE80211_ADDR_LEN];
+    uint16_t    reserved;
+    uint32_t    mode;
+    uint8_t     flags;
+    uint8_t     reserved2[3];
+#endif
 } __attribute__((packed));
+
+#if __IO80211_TARGET == __MAC_15_2
+// Native request 0xe5: mixed-endian advertiser record, without a version word.
+struct awdl_peer_advert_add {
+    uint8_t bytes[44];
+} __attribute__((packed));
+
+struct apple80211_awdl_election_params {
+    uint32_t    version;
+    uint32_t    reserved1;
+    uint32_t    format;
+    uint32_t    reserved2;
+    uint8_t     flags;
+    uint8_t     reserved3;
+    uint16_t    election_id;
+    uint8_t     distance;
+    uint8_t     reserved4;
+    uint8_t     master[APPLE80211_ADDR_LEN];
+    uint32_t    master_metric;
+    uint32_t    self_metric;
+    uint8_t     reserved5[20];
+} __attribute__((packed));
+#endif
+
+#if __IO80211_TARGET == __MAC_15_2
+// IO80211AWDLPeerManager consumes these event payloads without a version prefix.
+struct apple80211_availability_window_start {
+    uint32_t aw_counter;
+    uint32_t sync_state;
+    uint8_t sync_master[6];
+    uint8_t top_master[6];
+    uint32_t timestamp_be;
+    apple80211_channel channel;
+};
+
+struct apple80211_availability_window_extensions_end {
+    uint32_t extension_count;
+    uint32_t timestamp_be;
+    uint8_t reserved[4];
+    uint32_t beacon_count;
+    uint8_t cca[24];
+};
+#endif
 
 struct apple80211_awdl_sync_params {
     uint32_t    version;
@@ -1047,21 +1133,48 @@ struct apple80211_awdl_sync_params {
     uint32_t    availability_window_period;
     uint32_t    extension_length;
     uint32_t    synchronization_frame_period;
+#if __IO80211_TARGET == __MAC_15_2
+    uint32_t    non_election_master_sync_frame_period;
+#endif
 } __attribute__((packed));
 
 struct apple80211_awdl_cap {
+#if __IO80211_TARGET == __MAC_15_2
+    uint16_t    version;
+    uint16_t    length;
+    uint8_t     cap;
+    uint8_t     reserved[3];
+#else
     uint32_t    version;
     uint8_t     cap;
+#endif
 } __attribute__((packed));
 
 struct apple80211_awdl_af_tx_mode {
     uint32_t    version;
+#if __IO80211_TARGET == __MAC_15_2
+    uint32_t    mode;
+#else
     uint64_t    mode;
+#endif
 } __attribute__((packed));
 
 #define AWDL_OOB_AF_PARAMS_SIZE 38
 
 struct apple80211_awdl_oob_request {
+#if __IO80211_TARGET == __MAC_15_2
+    uint32_t version;
+    uint8_t destination[6];
+    uint8_t reserved1[2];
+    uint32_t tx_offset_us;
+    uint32_t tx_channel_map;
+    uint16_t flags;
+    uint8_t bssid[6];
+    uint8_t reserved2[12];
+    uint16_t data_len;
+    uint8_t reserved3[6];
+    const uint8_t *data;
+#else
     uint32_t    version;
     uint32_t    unk1;               // 4
     uint32_t    unk2;               // 8
@@ -1077,6 +1190,7 @@ struct apple80211_awdl_oob_request {
     uint32_t    pad4;
     uint16_t    unk9;               // 44
     uint8_t     data[1782];         // 48
+#endif
 } __attribute__((packed));
 
 //Roam: <airport[565]> DISABLED, 2.4GHz on awdl0 => {
@@ -1416,5 +1530,35 @@ struct apple80211_driver_available_data {
 } __attribute__((packed));
 
 static_assert(sizeof(struct apple80211_driver_available_data) == 0xB8, "invalid struct apple80211_driver_available_data");
+
+struct apple80211_companion_skywalk_if_create {
+    uint32_t version;
+    uint32_t action;
+    char bsd_name[16];
+} __attribute__((packed));
+
+static_assert(sizeof(struct apple80211_companion_skywalk_if_create) == 0x18,
+              "invalid struct apple80211_companion_skywalk_if_create");
+
+struct apple80211_llw_params {
+    uint32_t version;
+    uint8_t peer_mac[6];
+    uint8_t mode;
+    uint8_t enable;
+    uint8_t flags;
+    uint8_t reserved0;
+    uint16_t slot_duration;
+    uint16_t max_window;
+    uint16_t control_flags;
+    uint8_t retries;
+    uint8_t param15;
+    uint8_t param16;
+    uint8_t reserved1;
+    uint8_t ac_flags;
+    uint8_t reserved2[19];
+} __attribute__((packed));
+
+static_assert(sizeof(struct apple80211_llw_params) == 0x2c,
+              "invalid struct apple80211_llw_params");
 
 #endif // _APPLE80211_IOCTL_H_

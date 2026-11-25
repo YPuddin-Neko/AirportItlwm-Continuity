@@ -55,8 +55,9 @@ inline bool itlTxCompletionValid(unsigned tail, unsigned queued,
     return advance <= queued;
 }
 
-constexpr uint16_t itlTxOffloadHeader(unsigned headerBytes) {
-    return uint16_t(((headerBytes / 2) << 8) | ((headerBytes % 4) ? (1U << 13) : 0));
+constexpr uint16_t itlTxOffloadHeader(unsigned headerBytes, bool amsdu = false) {
+    return uint16_t(((headerBytes / 2) << 8) | (amsdu ? (1U << 14) :
+        ((headerBytes % 4) ? (1U << 13) : 0)));
 }
 
 #endif

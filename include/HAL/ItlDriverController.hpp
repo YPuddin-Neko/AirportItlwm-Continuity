@@ -20,6 +20,8 @@ class ItlDriverController {
 public:
     
     virtual void clearScanningFlags() = 0;
+
+    virtual void abortScanning() { clearScanningFlags(); }
     
     virtual IOReturn setMulticastList(IOEthernetAddress *addr, int count) = 0;
 };

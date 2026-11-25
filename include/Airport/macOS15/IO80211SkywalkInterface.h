@@ -25,7 +25,7 @@ typedef UInt64 IO80211FlowQueueHash;
 class IO80211Peer;
 class CCPipe;
 class IO80211APIUserClient;
-struct apple80211_wme_ac;
+enum apple80211_wme_ac : int;
 struct apple80211_interface_availability;
 struct apple80211_cca_report;
 struct apple80211_stat_report;
@@ -56,6 +56,7 @@ struct TxPacketRequest {
 static_assert(sizeof(struct TxPacketRequest) == 0x60, "TxPacketRequest size error");
 
 class IO80211Controller;
+class IO80211VirtualInterface;
 class CCLogStream;
 
 class IO80211SkywalkInterface : public IOSkywalkEthernetInterface {
@@ -200,6 +201,12 @@ public:
     OSString *setInterfaceRole(unsigned int);
     void *setInterfaceId(unsigned int);
     int getInterfaceRole();
+    void setLowLatencyEnabled(bool);
+    bool isLowLatencyEnabled();
+    void setParentInterface(IO80211VirtualInterface *);
+    void setInitMacAddress(ether_addr &);
+    void setCompanionInterfaceId(unsigned int);
+    IOReturn recordInputPacket(int, int);
 };
 static_assert(sizeof(IO80211SkywalkInterface) == 0x118, "WCL ABI size");
 #endif

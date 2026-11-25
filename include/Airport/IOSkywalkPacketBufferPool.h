@@ -36,9 +36,9 @@ public:
     virtual void free() APPLE_KEXT_OVERRIDE;
     virtual bool initWithName(char const*,void *,uint,IOSkywalkPacketBufferPool::PoolOptions const*);
     virtual bool initWithName(char const*,OSObject *,uint,IOSkywalkPacketBufferPool::PoolOptions const*);
-    virtual bool allocatePacket(IOSkywalkPacket **,uint);
-    virtual bool allocatePacket(uint,IOSkywalkPacket **,uint);
-    virtual bool allocatePackets(uint,uint *,IOSkywalkPacket **,uint);
+    virtual IOReturn allocatePacket(IOSkywalkPacket **,uint);
+    virtual IOReturn allocatePacket(uint,IOSkywalkPacket **,uint);
+    virtual IOReturn allocatePackets(uint,uint *,IOSkywalkPacket **,uint);
     virtual void deallocatePacket(IOSkywalkPacket *);
     virtual void deallocatePackets(IOSkywalkPacket **,uint);
     virtual void deallocatePacketList(IOSkywalkPacket *);
