@@ -1,0 +1,113 @@
+--- a/BrcmPatchRAM/BlueToolFixup.cpp
++++ b/BrcmPatchRAM/BlueToolFixup.cpp
+@@ -11,10 +11,14 @@
+ #include <Headers/kern_user.hpp>
+ #include <Headers/kern_util.hpp>
+ #include <Headers/kern_version.hpp>
+ #include <Headers/kern_devinfo.hpp>
+ 
++
++#include "IntelStandardHCI.hpp"
++#include "IntelAudioClock.hpp"
++#include "IntelPrivacyInstaller.hpp"
+ 
+ #define MODULE_SHORT "btlfx"
+ 
+ 
+ class EXPORT BlueToolFixup : public IOService {
+@@ -142,10 +146,24 @@
+ static const uint8_t kSkipInternalControllerNVRAMCheckPatched13_3[] =
+ {
+     0x90, 0x90, 0x90, 0x90,
+     0x90, 0x90,
+     0x90, 0x90,
++    0x90, 0x90
++};
++
++static const uint8_t kBadChipsetCheckOriginal15_4[] =
++{
++    0x81, 0xF9,              // cmp ecx
++    0x6F, 0x17, 0x00, 0x00,  // int 5999
++    0x77, 0x30               // ja short
++};
++
++static const uint8_t kBadChipsetCheckPatched15_4[] =
++{
++    0x90, 0x90,
++    0x90, 0x90, 0x90, 0x90,
+     0x90, 0x90
+ };
+ 
+ static bool shouldPatchBoardId = false;
+ static bool shouldPatchAddress = false;
+@@ -200,22 +218,50 @@
+ 
+ static void patched_cs_validate_page(vnode_t vp, memory_object_t pager, memory_object_offset_t page_offset, const void *data, int *validated_p, int *tainted_p, int *nx_p) {
+     char path[PATH_MAX];
+     int pathlen = PATH_MAX;
+     FunctionCast(patched_cs_validate_page, orig_cs_validate)(vp, pager, page_offset, data, validated_p, tainted_p, nx_p);
++    if (validated_p && tainted_p && nx_p)
++        IntelPrivacyInstaller::onPage(vp, page_offset, data, *validated_p, *tainted_p, *nx_p);
+     static constexpr size_t dirLength = sizeof("/usr/sbin/")-1;
+     if (vn_getpath(vp, path, &pathlen) == 0 && UNLIKELY(strncmp(path, "/usr/sbin/", dirLength) == 0)) {
+         if (strcmp(path + dirLength, "BlueTool") == 0) {
+             searchAndPatch(data, PAGE_SIZE, path, kSkipUpdateFilePathOriginal, kSkipUpdateFilePathPatched);
+             if (shouldPatchBoardId)
+                 searchAndPatch(data, PAGE_SIZE, path, boardIdsWithUSBBluetooth[0], kBoardIdSize, BaseDeviceInfo::get().boardIdentifier, kBoardIdSize);
+         }
+         else if (strcmp(path + dirLength, "bluetoothd") == 0) {
++            if (getKernelVersion() == KernelVersion::Sequoia &&
++                getKernelMinorVersion() == 6 &&
++                IntelStandardHCI::apply(const_cast<void *>(data), PAGE_SIZE)) {
++                SYSLOG(MODULE_SHORT, "9462 24H32 standard LE advertising, scanning and connection policies applied");
++            }
++            if (getKernelVersion() == KernelVersion::Sequoia &&
++                getKernelMinorVersion() == 6 &&
++                IntelStandardHCI::applyPowerQuery(const_cast<void *>(data), PAGE_SIZE)) {
++                SYSLOG(MODULE_SHORT, "9462 24H32 LE TX power command-family selector applied");
++            }
++            if (getKernelVersion() == KernelVersion::Sequoia && getKernelMinorVersion() == 6) {
++                if (IntelAudioClock::apply(const_cast<void *>(data), PAGE_SIZE))
++                    SYSLOG(MODULE_SHORT, "24H32 local audio clock connection lookup corrected");
++                if (IntelStandardHCI::applyEventMasks(const_cast<void *>(data), PAGE_SIZE))
++                    SYSLOG(MODULE_SHORT, "9462 24H32 LE startup event mask 0x21a5f applied");
++                if (IntelStandardHCI::applyEventMaskGetter(const_cast<void *>(data), PAGE_SIZE))
++                    SYSLOG(MODULE_SHORT, "9462 24H32 LE resume event mask 0x21a5f applied");
++                if (IntelStandardHCI::applyMultiAdvRandomAddress(const_cast<void *>(data), PAGE_SIZE))
++                    SYSLOG(MODULE_SHORT, "9462 24H32 multi-advertising random address support retained");
++                if (IntelStandardHCI::applyAdvSetRandomAddress(const_cast<void *>(data), PAGE_SIZE))
++                    SYSLOG(MODULE_SHORT, "9462 24H32 LE advertising set random address programming applied");
++                if (IntelStandardHCI::applyThirdPartyForce1M(const_cast<void *>(data), PAGE_SIZE))
++                    SYSLOG(MODULE_SHORT, "9462 24H32 third-party LE 1M default PHY applied");
++            }
+             searchAndPatch(data, PAGE_SIZE, path, kVendorCheckOriginal, kVendorCheckPatched);
+             searchAndPatch(data, PAGE_SIZE, path, kBadChipsetCheckOriginal, kBadChipsetCheckPatched);
+             if (getKernelVersion() >= KernelVersion::Ventura && getKernelVersion() < KernelVersion::Sequoia)
+                 searchAndPatch(data, PAGE_SIZE, path, kBadChipsetCheckOriginal13_3, kBadChipsetCheckPatched13_3);
++            if (getKernelVersion() >= KernelVersion::Sequoia)
++                searchAndPatch(data, PAGE_SIZE, path, kBadChipsetCheckOriginal15_4, kBadChipsetCheckPatched15_4);
+             if (shouldPatchNvramCheck)
+                 searchAndPatchWithMask(data, PAGE_SIZE, path, kSkipInternalControllerNVRAMCheck13_3, sizeof(kSkipInternalControllerNVRAMCheck13_3), kSkipInternalControllerNVRAMCheckMask13_3, sizeof(kSkipInternalControllerNVRAMCheckMask13_3), kSkipInternalControllerNVRAMCheckPatched13_3, sizeof(kSkipInternalControllerNVRAMCheckPatched13_3), nullptr, 0);
+             if (shouldPatchBoardId)
+                 searchAndPatch(data, PAGE_SIZE, path, boardIdsWithUSBBluetooth[0], kBoardIdSize, BaseDeviceInfo::get().boardIdentifier, kBoardIdSize);
+             if (shouldPatchAddress)
+@@ -250,12 +296,18 @@
+             // 12.4 Beta 3+, XNU 21.5
+             shouldPatchAddress = checkKernelArgument("-btlfxallowanyaddr");
+         if (getKernelVersion() <= KernelVersion::Sonoma)
+             shouldPatchNvramCheck = checkKernelArgument("-btlfxnvramcheck");
+         KernelPatcher::RouteRequest csRoute = KernelPatcher::RouteRequest("_cs_validate_page", patched_cs_validate_page, orig_cs_validate);
+-        if (!patcher.routeMultipleLong(KernelPatcher::KernelID, &csRoute, 1))
++        if (!patcher.routeMultipleLong(KernelPatcher::KernelID, &csRoute, 1)) {
+             SYSLOG(MODULE_SHORT, "failed to route cs validation pages");
++            patcher.clearError();
++            return;
++        }
++        if (getKernelVersion() == KernelVersion::Sequoia && getKernelMinorVersion() == 6 &&
++            !IntelPrivacyInstaller::start(patcher))
++            SYSLOG(MODULE_SHORT, "9462 privacy page installer unavailable");
+     });
+ }
+ 
+ // Boot args.
+ static const char *bootargOff[] {

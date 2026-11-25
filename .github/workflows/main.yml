@@ -26,11 +26,11 @@ jobs:
           repository: acidanthera/MacKernelSDK
           ref: 3f750085caa17ec3a7880f11c11bf4f48cd6a164
           path: MacKernelSDK
-      - name: Run isolated ASan/UBSan test suites
+      - name: Run isolated Wi-Fi & Bluetooth ASan/UBSan test suites
         run: python3 scripts/run-tests.py --jobs 4
 
   build:
-    name: Sequoia (${{ matrix.configuration }})
+    name: Sequoia Suite (${{ matrix.configuration }})
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -52,17 +52,22 @@ jobs:
           else
             python3 scripts/build-sequoia.py --configuration Release --jobs 4
           fi
-      - name: Package kernel extension
+      - name: Build Bluetooth Companion Kexts (${{ matrix.configuration }})
+        run: |
+          set -euo pipefail
+          python3 scripts/build-bluetooth.py bluetool --configuration "${{ matrix.configuration }}" --jobs 4
+          python3 scripts/build-bluetooth.py firmware --configuration "${{ matrix.configuration }}" --jobs 4
+      - name: Package Wi-Fi & Bluetooth Kexts
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          version=$(python3 -c 'import re, pathlib; print(re.search(r"^VERSION\s*=\s*\"([^\"]+)\"", pathlib.Path("scripts/build-sequoia.py").read_text(), re.M).group(1))')
           short_sha=$(git rev-parse --short HEAD)
           cfg=$(printf '%s' "${{ matrix.configuration }}" | tr '[:lower:]' '[:upper:]')
-          out_zip="artifacts/AirportItlwm-Sequoia-v${version}-${cfg}-${short_sha}.zip"
-          ditto -c -k --keepParent "build/Sequoia-${{ matrix.configuration }}/AirportItlwm_Sequoia.kext" "$out_zip"
+          ditto -c -k --keepParent "build/Sequoia-${{ matrix.configuration }}/AirportItlwm_Sequoia.kext" "artifacts/AirportItlwm-Sequoia-v2.5.0-${cfg}-${short_sha}.zip"
+          ditto -c -k --keepParent "build/bluetooth/products/bluetool/${{ matrix.configuration }}/BlueToolFixup.kext" "artifacts/BlueToolFixup-v2.7.2-${cfg}-${short_sha}.zip"
+          ditto -c -k --keepParent "build/bluetooth/products/firmware/${{ matrix.configuration }}/IntelBluetoothFirmware.kext" "artifacts/IntelBluetoothFirmware-v2.5.1-${cfg}-${short_sha}.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: AirportItlwm-Sequoia-${{ matrix.configuration }}
-          path: artifacts/AirportItlwm-Sequoia-*.zip
+          name: Continuity-Sequoia-Suite-${{ matrix.configuration }}
+          path: artifacts/*.zip
           if-no-files-found: error

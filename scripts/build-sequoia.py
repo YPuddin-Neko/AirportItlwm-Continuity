@@ -11,7 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 SDK_REVISION = "3f750085caa17ec3a7880f11c11bf4f48cd6a164"
-VERSION = "2.4.0d118"
+VERSION = "2.5.0"
 
 
 def project_sources():
@@ -154,7 +154,7 @@ __private_extern__ int _kext_apple_cc = __APPLE_CC__;
     info = plistlib.loads((ROOT / "AirportItlwm/WCL/Sequoia-Info.plist").read_bytes())
     info.update(CFBundleDevelopmentRegion="en", CFBundleExecutable="AirportItlwm",
                 CFBundleIdentifier="com.zxystd.AirportItlwm", CFBundleName="AirportItlwm",
-                CFBundlePackageType="KEXT", CFBundleShortVersionString="2.4.0",
+                CFBundlePackageType="KEXT", CFBundleShortVersionString="2.5.0",
                 CFBundleVersion=VERSION)
     (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps(info, sort_keys=False))
     print(bundle)
