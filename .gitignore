@@ -5,4 +5,7 @@ xcuserdata
 project.xcworkspace
 FwBinary.cpp
 *.pyc
+__pycache__/
 MacKernelSDK
+artifacts/
+logs/

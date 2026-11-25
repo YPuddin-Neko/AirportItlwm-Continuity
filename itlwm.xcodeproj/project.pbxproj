@@ -21,6 +21,16 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		A1D200000000000000000002 /* AirportItlwmAWDLInterface.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D200000000000000000001 /* AirportItlwmAWDLInterface.cpp */; };
+		A1D10000000000000000000B /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D10000000000000000000A /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D100000000000000000009 /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D100000000000000000008 /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D100000000000000000007 /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D100000000000000000006 /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D100000000000000000005 /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D100000000000000000004 /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
+		A1D100000000000000000002 /* ItlIwxAWDL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000001 /* ItlIwxAWDL.cpp */; };
 		A112F5371BD949CD8CA19D88 /* WCL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A112F5371BD949CD8CA19D89 /* WCL.cpp */; };
 		024A07B023FCBC3C009FBA6C /* itlwm.hpp in Headers */ = {isa = PBXBuildFile; fileRef = 024A07AF23FCBC3C009FBA6C /* itlwm.hpp */; };
 		024A07B223FCBC3C009FBA6C /* itlwm.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 024A07B123FCBC3C009FBA6C /* itlwm.cpp */; };
@@ -1062,6 +1072,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A1D200000000000000000001 /* AirportItlwmAWDLInterface.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = AirportItlwmAWDLInterface.cpp; sourceTree = "<group>"; };
+		A1D100000000000000000001 /* ItlIwxAWDL.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ItlIwxAWDL.cpp; sourceTree = "<group>"; };
 		A112F5371BD949CD8CA19D89 /* WCL.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = AirportItlwm/WCL/WCL.cpp; sourceTree = SOURCE_ROOT; };
 		024A07AC23FCBC3C009FBA6C /* itlwm.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = itlwm.kext; sourceTree = BUILT_PRODUCTS_DIR; };
 		024A07AF23FCBC3C009FBA6C /* itlwm.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = itlwm.hpp; sourceTree = "<group>"; };
@@ -1309,7 +1321,7 @@
 		F8FA0EEB2501E7EE00B1822E /* zutil.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = zutil.h; sourceTree = "<group>"; };
 		F8FA0EED2501E8C100B1822E /* zutil.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = zutil.c; sourceTree = "<group>"; };
 		3FCE22CDA614FF2D176FAC46 /* AirportItlwm.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirportItlwm.kext; sourceTree = BUILT_PRODUCTS_DIR; };
-		873185406E684353B0988B8A /* AirportItlwm.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirportItlwm.kext; sourceTree = BUILT_PRODUCTS_DIR; };
+		873185406E684353B0988B8A /* AirportItlwm_Sequoia.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AirportItlwm_Sequoia.kext; sourceTree = BUILT_PRODUCTS_DIR; };
 		F8E3806526D533D400568FEB /* iwlwifi-ty-a0-gf-a0.pnvm */ = {isa = PBXFileReference; lastKnownFileType = file; path = "iwlwifi-ty-a0-gf-a0.pnvm"; sourceTree = "<group>"; };
 		F8E49A12249B923500BE6868 /* ItlNetworkUserClient.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ItlNetworkUserClient.cpp; sourceTree = "<group>"; };
 		F8E49A13249B923500BE6868 /* ItlNetworkUserClient.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = ItlNetworkUserClient.hpp; sourceTree = "<group>"; };
@@ -1457,7 +1469,7 @@
 		024A07AD23FCBC3C009FBA6C /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				873185406E684353B0988B8A /* AirportItlwm.kext */,
+				873185406E684353B0988B8A /* AirportItlwm_Sequoia.kext */,
 				024A07AC23FCBC3C009FBA6C /* itlwm.kext */,
 				F89B6BB925021C9C000F77FF /* AirportItlwm.kext */,
 				35CBE6BA251CB89700435CBC /* AirportItlwm.kext */,
@@ -1668,6 +1680,7 @@
 				F89B6BBF25021C9C000F77FF /* Info.plist */,
 				F883EC1F266F43F200EA018C /* AirportItlwm-Monterey-Info.plist */,
 				F8A028202A4A7DDC00C6DE90 /* AirportItlwmV2.cpp */,
+				A1D200000000000000000001 /* AirportItlwmAWDLInterface.cpp */,
 				F8A028212A4A7DDC00C6DE90 /* AirportItlwmV2.hpp */,
 				F8A0282D2A4A7E0400C6DE90 /* AirportItlwmEthernetInterface.cpp */,
 				F8A0282E2A4A7E0400C6DE90 /* AirportItlwmEthernetInterface.hpp */,
@@ -1686,6 +1699,7 @@
 				F8D6CD6D2442F20C00D2A454 /* if_iwxvar.h */,
 				F8D6CD622442E8F200D2A454 /* ItlIwx.hpp */,
 				F8D6CD642442E8F200D2A454 /* ItlIwx.cpp */,
+				A1D100000000000000000001 /* ItlIwxAWDL.cpp */,
 			);
 			path = hal_iwx;
 			sourceTree = "<group>";
@@ -2456,7 +2470,7 @@
 			);
 			name = "AirportItlwm-Sequoia";
 			productName = AirportItlwm;
-			productReference = 873185406E684353B0988B8A /* AirportItlwm.kext */;
+			productReference = 873185406E684353B0988B8A /* AirportItlwm_Sequoia.kext */;
 			productType = "com.apple.product-type.kernel-extension";
 		};
 /* End PBXNativeTarget section */
@@ -2635,6 +2649,7 @@
 				F8A4307325062CE300EA545E /* zutil.c in Sources */,
 				F8294FE424FCBF5100239253 /* FwBinary.cpp in Sources */,
 				F8ED134424FBB5B70068C831 /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000009 /* ItlIwxAWDL.cpp in Sources */,
 				F8C772922443439A00A1B8A0 /* compat.cpp in Sources */,
 				024A085223FCBC6C009FBA6C /* poly1305.c in Sources */,
 				024A083023FCBC6C009FBA6C /* sha2.c in Sources */,
@@ -2764,6 +2779,7 @@
 				35CBE6A0251CB89700435CBC /* zutil.c in Sources */,
 				35CBE6A1251CB89700435CBC /* ItlHalService.cpp in Sources */,
 				35CBE6A2251CB89700435CBC /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000004 /* ItlIwxAWDL.cpp in Sources */,
 				35CBE6A3251CB89700435CBC /* utils.cpp in Sources */,
 				35CBE6A4251CB89700435CBC /* fw.cpp in Sources */,
 				35CBE6A5251CB89700435CBC /* io.cpp in Sources */,
@@ -2844,6 +2860,7 @@
 				35CBE70A251CB8BF00435CBC /* zutil.c in Sources */,
 				35CBE70B251CB8BF00435CBC /* ItlHalService.cpp in Sources */,
 				35CBE70C251CB8BF00435CBC /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000006 /* ItlIwxAWDL.cpp in Sources */,
 				35CBE70D251CB8BF00435CBC /* utils.cpp in Sources */,
 				35CBE70E251CB8BF00435CBC /* fw.cpp in Sources */,
 				35CBE70F251CB8BF00435CBC /* io.cpp in Sources */,
@@ -2924,6 +2941,7 @@
 				35CBE775251CB8CA00435CBC /* zutil.c in Sources */,
 				35CBE776251CB8CA00435CBC /* ItlHalService.cpp in Sources */,
 				35CBE777251CB8CA00435CBC /* ItlIwx.cpp in Sources */,
+				A1D10000000000000000000B /* ItlIwxAWDL.cpp in Sources */,
 				35CBE778251CB8CA00435CBC /* utils.cpp in Sources */,
 				35CBE779251CB8CA00435CBC /* fw.cpp in Sources */,
 				35CBE77A251CB8CA00435CBC /* io.cpp in Sources */,
@@ -3003,6 +3021,7 @@
 				F897ECFC266EFF93005EE8F7 /* zutil.c in Sources */,
 				F897ECFD266EFF93005EE8F7 /* ItlHalService.cpp in Sources */,
 				F897ECFE266EFF93005EE8F7 /* ItlIwx.cpp in Sources */,
+				A1D10000000000000000000A /* ItlIwxAWDL.cpp in Sources */,
 				F897ECFF266EFF93005EE8F7 /* utils.cpp in Sources */,
 				F897ED00266EFF93005EE8F7 /* fw.cpp in Sources */,
 				F897ED01266EFF93005EE8F7 /* io.cpp in Sources */,
@@ -3085,6 +3104,7 @@
 				F89B6C1F250231E4000F77FF /* zutil.c in Sources */,
 				F89B6BF12502316A000F77FF /* ItlHalService.cpp in Sources */,
 				F89B6BF025023162000F77FF /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000002 /* ItlIwxAWDL.cpp in Sources */,
 				F89B6BE22502315B000F77FF /* utils.cpp in Sources */,
 				F89B6BE32502315B000F77FF /* fw.cpp in Sources */,
 				F89B6BE42502315B000F77FF /* io.cpp in Sources */,
@@ -3164,6 +3184,7 @@
 				F8AE653B285471560085B4CF /* zutil.c in Sources */,
 				F8AE653C285471560085B4CF /* ItlHalService.cpp in Sources */,
 				F8AE653D285471560085B4CF /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000008 /* ItlIwxAWDL.cpp in Sources */,
 				F8AE653E285471560085B4CF /* utils.cpp in Sources */,
 				F8AE653F285471560085B4CF /* fw.cpp in Sources */,
 				F8AE6540285471560085B4CF /* io.cpp in Sources */,
@@ -3248,6 +3269,7 @@
 				F8B210ED2A2EC2680043ECBD /* zutil.c in Sources */,
 				F8B210EE2A2EC2680043ECBD /* ItlHalService.cpp in Sources */,
 				F8B210EF2A2EC2680043ECBD /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000007 /* ItlIwxAWDL.cpp in Sources */,
 				F8B210F02A2EC2680043ECBD /* utils.cpp in Sources */,
 				F8B210F12A2EC2680043ECBD /* fw.cpp in Sources */,
 				F8B210F22A2EC2680043ECBD /* io.cpp in Sources */,
@@ -3330,6 +3352,7 @@
 				F8D94CDB2B9ABFE20081A3C4 /* zutil.c in Sources */,
 				F8D94CDC2B9ABFE20081A3C4 /* ItlHalService.cpp in Sources */,
 				F8D94CDD2B9ABFE20081A3C4 /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000005 /* ItlIwxAWDL.cpp in Sources */,
 				F8D94CDE2B9ABFE20081A3C4 /* utils.cpp in Sources */,
 				F8D94CDF2B9ABFE20081A3C4 /* fw.cpp in Sources */,
 				F8D94CE02B9ABFE20081A3C4 /* io.cpp in Sources */,
@@ -3354,6 +3377,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1D200000000000000000002 /* AirportItlwmAWDLInterface.cpp in Sources */,
 				A7D000012026100700000001 /* ItlDma.cpp in Sources */,
 				F8D94CA62B9ABFE20081A3C4 /* rs.cpp in Sources */,
 				F8D94CA72B9ABFE20081A3C4 /* _mbuf.cpp in Sources */,
@@ -3412,6 +3436,7 @@
 				F8D94CDB2B9ABFE20081A3C4 /* zutil.c in Sources */,
 				F8D94CDC2B9ABFE20081A3C4 /* ItlHalService.cpp in Sources */,
 				F8D94CDD2B9ABFE20081A3C4 /* ItlIwx.cpp in Sources */,
+				A1D100000000000000000005 /* ItlIwxAWDL.cpp in Sources */,
 				F8D94CDE2B9ABFE20081A3C4 /* utils.cpp in Sources */,
 				F8D94CDF2B9ABFE20081A3C4 /* fw.cpp in Sources */,
 				F8D94CE02B9ABFE20081A3C4 /* io.cpp in Sources */,
@@ -4251,6 +4276,7 @@
 				PRODUCT_NAME = AirportItlwm;
 				SYSTEM_HEADER_SEARCH_PATHS = "itl80211/openbsd itl80211 include";
 				WRAPPER_EXTENSION = kext;
+				WRAPPER_NAME = AirportItlwm_Sequoia.kext;
 			};
 			name = Debug;
 		};
@@ -4319,6 +4345,7 @@
 				PRODUCT_NAME = AirportItlwm;
 				SYSTEM_HEADER_SEARCH_PATHS = "itl80211/openbsd itl80211 include";
 				WRAPPER_EXTENSION = kext;
+				WRAPPER_NAME = AirportItlwm_Sequoia.kext;
 			};
 			name = Release;
 		};
