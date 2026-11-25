@@ -63,8 +63,8 @@ probe(IOService *provider, SInt32 *score)
     XYLog("%s\n", __PRETTY_FUNCTION__);
     bool isMatch = false;
     super::probe(provider, score);
-    UInt8 msiCap;
-    UInt8 msixCap;
+    UInt8 msiCap = 0;
+    UInt8 msixCap = 0;
     IOPCIDevice* device = OSDynamicCast(IOPCIDevice, provider);
     if (!device)
         return NULL;

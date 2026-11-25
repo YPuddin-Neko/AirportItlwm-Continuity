@@ -50,6 +50,7 @@ inline bool copyHardwareAddress(const uint8_t *address, HardwareAddress &out) {
 }
 
 enum BeaconFlags : uint32_t {
+    ProbeResponse = 1U << 0,
     SSIDPresent = 1U << 1,
     RSSIValid = 1U << 14
 };
@@ -64,6 +65,7 @@ enum Message : uint32_t {
     ConnectComplete = 213,
     JoinAbortComplete = 214,
     LinkStatus = 216,
+    ChannelSpecQueryCompleted = 224,
     LqmUpdate = 39,
     ScanDone = 237
 };
@@ -290,20 +292,20 @@ inline TrafficCounters makeTrafficCounters(const uint64_t *tx, const uint64_t *r
 struct ScanTiming {
     uint32_t maxOutTU;
     bool fragmented;
+    uint32_t suspendTU;
 };
 
 inline ScanTiming scanTiming(uint32_t awayMilliseconds, bool associated,
                              bool supportsFragmentation)
 {
     if (!associated)
-        return {0, false};
-    if (!awayMilliseconds)
-        return {120, false};
+        return {0, false, 0};
     uint64_t requested = uint64_t(awayMilliseconds) * 1000 / 1024;
-    uint32_t minimum = supportsFragmentation ? 44 : 110;
-    uint32_t maxOut = requested < minimum ? minimum :
-        requested > 120 ? 120 : uint32_t(requested);
-    return {maxOut, maxOut < 110};
+    // A normal 110 ms request must fit a full 110 TU passive dwell.
+    // Reserve fragmentation for explicit low-latency scans.
+    if (awayMilliseconds && requested < 100 && supportsFragmentation)
+        return {requested < 44 ? 44 : uint32_t(requested), true, 95};
+    return {120, false, 120};
 }
 
 inline uint16_t read16(const uint8_t *p) {
@@ -398,6 +400,66 @@ inline size_t selectWPA2TransitionMode(uint8_t *ies, size_t length) {
     }
     return length;
 }
+inline bool isHiddenSSID(const uint8_t *ssid, size_t length) {
+    if (!ssid || !length || length > 32)
+        return true;
+    uint8_t any = 0;
+    for (size_t i = 0; i < length; ++i)
+        any |= ssid[i];
+    return any == 0;
+}
+
+// Splice a known non-NUL SSID into Tag 0 of a hidden Beacon's IE buffer copy
+// (when Tag 0 is missing, empty, or all-NUL) so IO80211BSSBeacon preserves its
+// directed-network state (+0x52c == 1) and Probe Response RSN/SSID cache.
+inline size_t spliceHiddenBeaconSSID(const uint8_t *ies, size_t length,
+                                     const uint8_t *knownSsid, size_t knownLen,
+                                     uint8_t *out, size_t outCapacity) {
+    if (!ies || !out || length > outCapacity)
+        return 0;
+    if (!validIEs(ies, length) || isHiddenSSID(knownSsid, knownLen)) {
+        memcpy(out, ies, length);
+        return length;
+    }
+    for (size_t offset = 0; offset < length; ) {
+        const uint8_t *ie = ies + offset;
+        const size_t bodyLen = ie[1];
+        const size_t ieSize = bodyLen + 2;
+        if (ie[0] == 0) {
+            if (!isHiddenSSID(ie + 2, bodyLen)) {
+                memcpy(out, ies, length);
+                return length;
+            }
+            const size_t splicedLen = length - bodyLen + knownLen;
+            if (splicedLen > 2048 || splicedLen > outCapacity) {
+                memcpy(out, ies, length);
+                return length;
+            }
+            if (offset)
+                memcpy(out, ies, offset);
+            out[offset] = 0;
+            out[offset + 1] = uint8_t(knownLen);
+            memcpy(out + offset + 2, knownSsid, knownLen);
+            const size_t tailOffset = offset + ieSize;
+            if (tailOffset < length)
+                memcpy(out + offset + 2 + knownLen, ies + tailOffset, length - tailOffset);
+            return splicedLen;
+        }
+        offset += ieSize;
+    }
+    const size_t prependedLen = 2 + knownLen + length;
+    if (prependedLen > 2048 || prependedLen > outCapacity) {
+        memcpy(out, ies, length);
+        return length;
+    }
+    out[0] = 0;
+    out[1] = uint8_t(knownLen);
+    memcpy(out + 2, knownSsid, knownLen);
+    if (length)
+        memcpy(out + 2 + knownLen, ies, length);
+    return prependedLen;
+}
+
 inline bool probeChannel(bool active, bool passiveOnly, bool dfs) {
     return active && !passiveOnly && !dfs;
 }
@@ -410,10 +472,67 @@ struct ScanRequest {
     uint8_t bssid[6];
     uint32_t channelCount;
     uint8_t channels[32];
+    uint32_t ssidCount;
+    uint8_t ssidLengths[10];
+    uint8_t ssids[10][32];
 };
 
-inline bool scanChannelSelected(const uint8_t *channels, bool restricted, unsigned channel) {
-    return !restricted || (channel < 256 && (channels[channel / 8] & (1U << (channel % 8))));
+inline bool hasDirectedSSID(const ScanRequest &scan) {
+    if (!isHiddenSSID(scan.ssid, scan.ssidLength))
+        return true;
+    const unsigned count = scan.ssidCount <= 10 ? scan.ssidCount : 10;
+    for (unsigned i = 0; i < count; ++i) {
+        if (!isHiddenSSID(scan.ssids[i], scan.ssidLengths[i]))
+            return true;
+    }
+    return false;
+}
+
+template <typename Entry>
+inline void fillScanSSIDs(Entry *entries, unsigned count, const uint8_t *lengths,
+                         const uint8_t (*names)[32]) {
+    for (unsigned i = 0; i < count; ++i) {
+        entries[i].id = 0;
+        entries[i].len = lengths[i];
+        memcpy(entries[i].ssid, names[i], lengths[i]);
+    }
+}
+
+inline bool scanChannelSelected(const uint8_t *channels, bool restricted, unsigned channel,
+                                unsigned joinChannel = 0) {
+    return (!joinChannel || channel == joinChannel) &&
+        (!restricted || (channel < 256 && (channels[channel / 8] & (1U << (channel % 8)))));
+}
+
+inline unsigned joinChannelHint(uint16_t spec) {
+    // These are the 20 MHz encodings emitted in our native scan results.
+    // Unknown or wider encodings use the full scan instead of guessing a primary.
+    unsigned channel = spec & 0xff;
+    if ((spec & 0xff00) == 0x1000 && channel >= 1 && channel <= 14)
+        return channel;
+    if ((spec & 0xff00) == 0xd000 && channel > 14 && channel <= 196)
+        return channel;
+    return 0;
+}
+
+inline bool matchesScan(const ScanRequest &scan, const uint8_t *bssid,
+                        const uint8_t *ssid, size_t ssidLength, unsigned channel) {
+    uint8_t any = 0, all = 0xff;
+    for (unsigned i = 0; i < 6; ++i) {
+        any |= scan.bssid[i];
+        all &= scan.bssid[i];
+    }
+    if (any && all != 0xff && memcmp(scan.bssid, bssid, 6))
+        return false;
+    if (scan.ssidCount) {
+        bool matched = false;
+        for (unsigned i = 0; i < scan.ssidCount; ++i)
+            if (!scan.ssidLengths[i] || (scan.ssidLengths[i] == ssidLength &&
+                !memcmp(scan.ssids[i], ssid, ssidLength))) matched = true;
+        if (!matched) return false;
+    } else if (scan.ssidLength && (scan.ssidLength != ssidLength ||
+               memcmp(scan.ssid, ssid, ssidLength))) return false;
+    return scanChannelSelected(scan.channels, scan.channelCount != 0, channel);
 }
 
 inline bool decodeScan(const void *buffer, size_t length, ScanRequest &out) {
@@ -432,6 +551,19 @@ inline bool decodeScan(const void *buffer, size_t length, ScanRequest &out) {
     out.channelCount = count;
     memcpy(out.ssid, p + 0x20, ssidLength);
     memcpy(out.bssid, p + 0x14, 6);
+    // WCL carries up to ten SSIDs, including the native wildcard entry.
+    if (length >= 0x131c) {
+        out.ssidCount = read32(p + 0x1318);
+        if (out.ssidCount > 10 || length < 0x131c + size_t(out.ssidCount) * 56)
+            return false;
+        for (unsigned i = 0; i < out.ssidCount; ++i) {
+            const uint8_t *entry = p + 0x131c + i * 56;
+            const uint32_t size = read32(entry + 4);
+            if (size > 32) return false;
+            out.ssidLengths[i] = size;
+            memcpy(out.ssids[i], entry + 8, size);
+        }
+    }
     // Native entries are apple80211_channel: version, channel, flags (12 bytes).
     for (uint32_t i = 0; i < count; ++i) {
         const uint8_t *entry = p + 0x58 + size_t(i) * 12;
@@ -491,12 +623,14 @@ inline LegacyAuth classifyLegacyAuth(const JoinRequest &j) {
         return LegacyAuth::Invalid;
     }
     const uint32_t personal = (1u << 1) | (1u << 3) | (1u << 10);
+    const uint32_t personalTransition = (1u << 4) | (1u << 12) | (1u << 13);
     const uint32_t enterprise = (1u << 0) | (1u << 2) | (1u << 11);
-    if (j.upperAuth & ~(personal | enterprise)) return LegacyAuth::Invalid;
-    if ((j.upperAuth & personal) && (j.upperAuth & enterprise)) return LegacyAuth::Invalid;
-    if (j.upperAuth & personal)
+    if (j.upperAuth & personal) {
+        if (j.upperAuth & ~(personal | personalTransition)) return LegacyAuth::Invalid;
         return j.keyLength == 32 && (j.keyCipher == 6 || j.keyCipher == 7) ?
             LegacyAuth::Personal : LegacyAuth::Invalid;
+    }
+    if (j.upperAuth & ~enterprise) return LegacyAuth::Invalid;
     if (j.upperAuth & enterprise)
         return (!j.keyLength || (j.keyLength == 32 && (j.keyCipher == 6 || j.keyCipher == 7))) ?
             LegacyAuth::Enterprise : LegacyAuth::Invalid;
@@ -534,6 +668,327 @@ inline bool decodeJoin(const void *buffer, size_t length, JoinRequest &out) {
     out.rsnLength = rsnLength;
     memcpy(out.rsn, p + 0xd6, rsnLength);
     return true;
+}
+
+struct InfraBandwidths {
+    uint64_t maxBps;
+    uint64_t effectiveBps;
+};
+
+inline InfraBandwidths computeInfraBandwidths(uint32_t negotiatedTxKbps,
+                                              unsigned channelWidthCode,
+                                              bool isHE,
+                                              bool isVHT,
+                                              bool isHT,
+                                              unsigned txNss) {
+    const unsigned streams = txNss >= 2 ? 2U : 1U;
+    uint64_t ceilingBps = 54000000ULL;
+    if (isHE) {
+        const uint64_t perStream = channelWidthCode >= 3 ? 1201000000ULL :
+            (channelWidthCode == 2 ? 600500000ULL :
+             (channelWidthCode == 1 ? 286800000ULL : 143400000ULL));
+        ceilingBps = perStream * streams;
+    } else if (isVHT) {
+        const uint64_t perStream = channelWidthCode >= 3 ? 866650000ULL :
+            (channelWidthCode == 2 ? 433300000ULL :
+             (channelWidthCode == 1 ? 200000000ULL : 86700000ULL));
+        ceilingBps = perStream * streams;
+    } else if (isHT) {
+        const uint64_t perStream = channelWidthCode >= 1 ? 150000000ULL : 72200000ULL;
+        ceilingBps = perStream * streams;
+    }
+    const uint64_t negotiatedBps = uint64_t(negotiatedTxKbps) * 1000ULL;
+    uint64_t maxBps = negotiatedBps > ceilingBps ? negotiatedBps : ceilingBps;
+    if (maxBps > 4000000000ULL)
+        maxBps = 4000000000ULL;
+    const uint64_t floorEffBase = (ceilingBps * 80ULL) / 100ULL;
+    const uint64_t effBase = negotiatedBps > floorEffBase ? negotiatedBps : floorEffBase;
+    uint64_t effectiveBps = (effBase * 85ULL) / 100ULL;
+    if (effectiveBps > maxBps)
+        effectiveBps = maxBps;
+    return {maxBps, effectiveBps};
+}
+
+inline uint64_t multiSsidDigest(const ScanRequest &scan) {
+    const unsigned count = scan.ssidCount <= 10 ? scan.ssidCount : 10;
+    uint64_t hash = 1469598103934665603ULL;
+    hash = (hash ^ uint64_t(count)) * 1099511628211ULL;
+    for (unsigned i = 0; i < count; ++i) {
+        const unsigned len = scan.ssidLengths[i] <= 32 ? scan.ssidLengths[i] : 32;
+        hash = (hash ^ uint64_t(len)) * 1099511628211ULL;
+        for (unsigned b = 0; b < len; ++b)
+            hash = (hash ^ uint64_t(scan.ssids[i][b])) * 1099511628211ULL;
+    }
+    return hash ? hash : 1ULL;
+}
+
+template <typename Node>
+inline auto nodeMatchesSSIDImpl(const Node *ni, const uint8_t *ssid, size_t len, int)
+    -> decltype(bool(size_t(ni->ni_esslen) == len && memcmp(ni->ni_essid, ssid, len) == 0)) {
+    return ni && size_t(ni->ni_esslen) == len && memcmp(ni->ni_essid, ssid, len) == 0;
+}
+template <typename Node>
+inline bool nodeMatchesSSIDImpl(const Node *, const uint8_t *, size_t, long) {
+    return false;
+}
+template <typename Node>
+inline bool nodeMatchesSSID(const Node *ni, const uint8_t *ssid, size_t len) {
+    return nodeMatchesSSIDImpl(ni, ssid, len, 0);
+}
+
+template <typename Ifp>
+inline auto readIfpDirectBytes(const Ifp &ifp, int)
+    -> decltype(uint64_t(ifp.if_ibytes) + uint64_t(ifp.if_obytes)) {
+    return uint64_t(ifp.if_ibytes) + uint64_t(ifp.if_obytes);
+}
+template <typename Ifp>
+inline auto readIfpDirectBytes(const Ifp &ifp, long)
+    -> decltype(uint64_t(ifp.if_data.ifi_ibytes) + uint64_t(ifp.if_data.ifi_obytes)) {
+    return uint64_t(ifp.if_data.ifi_ibytes) + uint64_t(ifp.if_data.ifi_obytes);
+}
+template <typename Ifp>
+inline uint64_t readIfpDirectBytes(const Ifp &, ...) {
+    return 0;
+}
+
+template <typename Inst>
+inline auto readInstanceBsdBytes(Inst *inst, int)
+    -> decltype((void)inst->bsdInterface->getIfnet(), uint64_t(0)) {
+#if defined(KERNEL) && defined(__KPI_INTERFACE__)
+    if (inst && inst->bsdInterface) {
+        if (auto bsdIfp = inst->bsdInterface->getIfnet()) {
+            struct ifnet_stats_param stats = {};
+            if (ifnet_stat(bsdIfp, &stats) == 0)
+                return uint64_t(stats.bytes_in) + uint64_t(stats.bytes_out);
+        }
+    }
+#else
+    (void)inst;
+#endif
+    return 0;
+}
+template <typename Inst>
+inline uint64_t readInstanceBsdBytes(Inst *, long) {
+    return 0;
+}
+
+template <typename Ifp, typename Inst>
+inline uint64_t sampleInfraTotalBytes(const Ifp &ifp, Inst *inst) {
+    const uint64_t bsdBytes = readInstanceBsdBytes(inst, 0);
+    const uint64_t directBytes = readIfpDirectBytes(ifp, 0);
+    return bsdBytes >= directBytes ? bsdBytes : directBytes;
+}
+
+template <typename Hal>
+inline auto abortDriverScanImpl(Hal *hal, int)
+    -> decltype((void)hal->getDriverController()->abortScanning()) {
+    if (hal && hal->getDriverController())
+        hal->getDriverController()->abortScanning();
+}
+template <typename Hal>
+inline auto abortDriverScanImpl(Hal *hal, long)
+    -> decltype((void)hal->getDriverController()->clearScanningFlags()) {
+    if (hal && hal->getDriverController())
+        hal->getDriverController()->clearScanningFlags();
+}
+template <typename Hal>
+inline void abortDriverScanImpl(Hal *, ...) {}
+
+template <typename Hal>
+inline void abortDriverScan(Hal *hal) {
+    abortDriverScanImpl(hal, 0);
+}
+
+struct InfraTrafficTracker {
+    uint64_t lastBytes;
+    uint64_t lastSampleUS;
+    uint64_t activeUntilUS;
+    bool initialized;
+
+    void reset() {
+        lastBytes = 0;
+        lastSampleUS = 0;
+        activeUntilUS = 0;
+        initialized = false;
+    }
+
+    bool sample(uint64_t totalBytes, uint64_t nowUS,
+                uint64_t holdWindowUS = 2000000ULL,
+                uint64_t minBurstBytes = 262144ULL,
+                uint64_t minRateBytesPerSec = 131072ULL) {
+        if (!initialized || nowUS < lastSampleUS || totalBytes < lastBytes) {
+            lastBytes = totalBytes;
+            lastSampleUS = nowUS;
+            initialized = true;
+            return nowUS < activeUntilUS;
+        }
+        const uint64_t dtUS = nowUS - lastSampleUS;
+        const uint64_t deltaBytes = totalBytes - lastBytes;
+        if (dtUS > 0) {
+            const bool recentBurst = (dtUS <= holdWindowUS && deltaBytes >= minBurstBytes);
+            const bool sustainedRate = (dtUS <= 10000000ULL && deltaBytes >= minBurstBytes &&
+                                        (deltaBytes * 1000000ULL) >= (minRateBytesPerSec * dtUS));
+            if (recentBurst || sustainedRate)
+                activeUntilUS = nowUS + holdWindowUS;
+            if (dtUS >= 250000ULL || recentBurst) {
+                lastBytes = totalBytes;
+                lastSampleUS = nowUS;
+            }
+        } else if (deltaBytes >= minBurstBytes) {
+            activeUntilUS = nowUS + holdWindowUS;
+            lastBytes = totalBytes;
+        }
+        return nowUS < activeUntilUS;
+    }
+};
+
+struct SplitScanBurst {
+    uint64_t startUS;
+    uint64_t lastStepUS;
+    uint64_t multiSsidDigest;
+    uint64_t lastMultiSsidScanUS;
+    InfraTrafficTracker traffic;
+    bool liveStepInFlight;
+    bool abortedScanInScanState;
+    uint8_t coveredChannels[32];
+
+    void reset() {
+        startUS = 0;
+        lastStepUS = 0;
+        multiSsidDigest = 0;
+        lastMultiSsidScanUS = 0;
+        traffic.reset();
+        liveStepInFlight = false;
+        abortedScanInScanState = false;
+        memset(coveredChannels, 0, sizeof(coveredChannels));
+    }
+
+    void resetBurstOnly() {
+        startUS = 0;
+        lastStepUS = 0;
+        liveStepInFlight = false;
+        memset(coveredChannels, 0, sizeof(coveredChannels));
+    }
+
+    bool isContinuation(const ScanRequest &scan, uint64_t nowUS,
+                        uint64_t stepWindowUS = 5000000ULL) const {
+        if (!startUS || !scan.channelCount)
+            return false;
+        const uint64_t refUS = lastStepUS ? lastStepUS : startUS;
+        if (nowUS < refUS || (nowUS - refUS) > stepWindowUS)
+            return false;
+        for (unsigned i = 0; i < sizeof(coveredChannels); ++i) {
+            if (scan.channels[i] & ~coveredChannels[i])
+                return true;
+        }
+        return false;
+    }
+
+    void recordLiveScan(const ScanRequest &scan, uint64_t nowUS,
+                        bool continuation) {
+        if (!scan.channelCount) {
+            resetBurstOnly();
+            liveStepInFlight = true;
+            return;
+        }
+        liveStepInFlight = true;
+        if (!continuation) {
+            startUS = nowUS;
+            lastStepUS = nowUS;
+            memcpy(coveredChannels, scan.channels, sizeof(coveredChannels));
+        } else {
+            lastStepUS = nowUS;
+            for (unsigned i = 0; i < sizeof(coveredChannels); ++i)
+                coveredChannels[i] |= scan.channels[i];
+        }
+    }
+
+    void noteScanFinished(uint64_t nowUS) {
+        if (!liveStepInFlight)
+            return;
+        liveStepInFlight = false;
+        if (startUS && nowUS >= lastStepUS)
+            lastStepUS = nowUS;
+    }
+
+    bool shouldThrottleMultiSsidBatch(uint64_t digest, uint64_t nowUS,
+                                      uint64_t cooldownUS = 20000000ULL) const {
+        if (!digest || digest != multiSsidDigest || !lastMultiSsidScanUS ||
+            nowUS < lastMultiSsidScanUS)
+            return false;
+        return (nowUS - lastMultiSsidScanUS) < cooldownUS;
+    }
+
+    void recordMultiSsidBatch(uint64_t digest, uint64_t nowUS) {
+        multiSsidDigest = digest;
+        lastMultiSsidScanUS = nowUS;
+    }
+};
+
+struct SplitScanSlot {
+    const void *owner;
+    SplitScanBurst burst;
+};
+
+inline SplitScanSlot *splitScanSlots() {
+    static SplitScanSlot slots[4];
+    return slots;
+}
+
+inline SplitScanBurst &splitScanBurstFor(const void *owner) {
+    SplitScanSlot *slots = splitScanSlots();
+    for (unsigned i = 0; i < 4; ++i) {
+        if (slots[i].owner == owner)
+            return slots[i].burst;
+    }
+    for (unsigned i = 0; i < 4; ++i) {
+        if (!slots[i].owner) {
+            slots[i].owner = owner;
+            slots[i].burst.reset();
+            return slots[i].burst;
+        }
+    }
+    slots[0].owner = owner;
+    slots[0].burst.reset();
+    return slots[0].burst;
+}
+
+inline void noteAbortedScanInScanState(const void *owner) {
+    splitScanBurstFor(owner).abortedScanInScanState = true;
+}
+
+inline bool consumeAbortedScanInScanState(const void *owner) {
+    SplitScanBurst &burst = splitScanBurstFor(owner);
+    const bool aborted = burst.abortedScanInScanState;
+    burst.abortedScanInScanState = false;
+    return aborted;
+}
+
+inline void resetSplitScanBurst(const void *owner, bool releaseSlot = false) {
+    SplitScanSlot *slots = splitScanSlots();
+    for (unsigned i = 0; i < 4; ++i) {
+        if (slots[i].owner == owner) {
+            slots[i].burst.reset();
+            if (releaseSlot)
+                slots[i].owner = nullptr;
+        }
+    }
+}
+
+inline bool shouldThrottleAssociatedBgscan(uint64_t lastLiveScanUS,
+                                           uint64_t nowUS,
+                                           int32_t rssiDbm,
+                                           uint64_t cooldownUS = 45000000ULL,
+                                           int32_t strongRssiFloorDbm = -68,
+                                           bool directedSSID = false,
+                                           bool splitContinuation = false) {
+    if (directedSSID || splitContinuation)
+        return false;
+    if (!lastLiveScanUS || nowUS < lastLiveScanUS)
+        return false;
+    if (rssiDbm < strongRssiFloorDbm)
+        return false;
+    return (nowUS - lastLiveScanUS) < cooldownUS;
 }
 
 }

@@ -443,6 +443,8 @@ struct ieee80211_node {
 	struct ieee80211_rx_ba	ni_rx_ba[IEEE80211_NUM_TID];
 
 	int			ni_txmcs;	/* current MCS used for TX */
+	uint32_t        ni_txrate_kbps; /* Last firmware-selected rate, 0 if unknown */
+	uint8_t         ni_txrate_reported;
 	int			ni_vht_ss;	/* VHT # spatial streams */
     
     uint8_t     ni_rx_nss;
@@ -716,6 +718,12 @@ void ieee80211_free_node(struct ieee80211com *, struct ieee80211_node *);
 
 int ieee80211_node_cmp(const struct ieee80211_node *,
 		const struct ieee80211_node *);
+struct ieee80211_scan_cursor {
+    u_int8_t last_mac[IEEE80211_ADDR_LEN];
+    bool started;
+};
+struct ieee80211_node *ieee80211_scan_next(struct ieee80211com *,
+    struct ieee80211_scan_cursor *);
 int ieee80211_ess_cmp(const struct ieee80211_ess_rbt *,
 		const struct ieee80211_ess_rbt *);
 RB_PROTOTYPE(ieee80211_tree, ieee80211_node, ni_node, ieee80211_node_cmp);

@@ -24,6 +24,7 @@ extern "C" {
 #include <net/bpf.h>
 }
 #include <IOKit/IOCommandGate.h>
+#include <IOKit/IOWorkLoop.h>
 
 extern IOCommandGate *_fCommandGate;
 
@@ -59,6 +60,16 @@ static IOReturn _if_input(OSObject *target, void *arg0, void *arg1, void *arg2, 
 
 int if_input(struct _ifnet *ifq, struct mbuf_list *ml)
 {
+    if (ml == NULL || ml_empty(ml)) {
+        return 0;
+    }
+    if (_fCommandGate == NULL) {
+        return 0;
+    }
+    IOWorkLoop *wl = _fCommandGate->getWorkLoop();
+    if (wl != NULL && wl->inGate()) {
+        return _if_input(NULL, ifq, ml, NULL, NULL);
+    }
     return _fCommandGate->runAction((IOCommandGate::Action)_if_input, ifq, ml);
 }
 

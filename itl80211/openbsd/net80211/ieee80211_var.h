@@ -442,10 +442,14 @@ struct ieee80211com {
     bool ic_wcl_mac_reconfig;
     bool ic_wcl_enterprise;
     bool ic_wcl_join_requested;
+    uint8_t ic_wcl_join_channel;
     bool ic_wcl_scan_requested;
     bool ic_wcl_scan_active;
     uint8_t ic_wcl_scan_ssid_length;
     uint8_t ic_wcl_scan_ssid[32];
+    uint8_t ic_wcl_scan_ssid_count;
+    uint8_t ic_wcl_scan_ssid_lengths[10];
+    uint8_t ic_wcl_scan_ssids[10][32];
     bool ic_wcl_scan_restricted;
     uint8_t ic_wcl_scan_channels[32];
     uint32_t ic_wcl_scan_away_time_ms;
@@ -460,6 +464,8 @@ struct ieee80211com {
 	struct ieee80211_channel ic_channels[IEEE80211_CHAN_MAX+1];
 	u_char			ic_chan_avail[howmany(IEEE80211_CHAN_MAX,NBBY)];
 	u_char			ic_chan_active[howmany(IEEE80211_CHAN_MAX, NBBY)];
+	u_char			ic_beacon_hint[howmany(IEEE80211_CHAN_MAX, NBBY)];
+	u_int16_t		ic_beacon_hint_mcc;
 	u_char			ic_chan_scan[howmany(IEEE80211_CHAN_MAX,NBBY)];
 	struct mbuf_queue	ic_mgtq;
 	struct mbuf_queue	ic_pwrsaveq;
@@ -699,6 +705,7 @@ struct ieee80211_beacon_event {
     size_t length;
     const uint8_t *frame;
     size_t frame_length;
+    int isprobe;
 };
 #endif
 

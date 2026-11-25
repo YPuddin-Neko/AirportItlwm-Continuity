@@ -78,6 +78,8 @@ struct ieee80211_rxinfo;
 struct ieee80211_rsnparams;
 extern	void ieee80211_set_link_state(struct ieee80211com *, int);
 extern	u_int ieee80211_get_hdrlen(const struct ieee80211_frame *);
+extern	int ieee80211_sta_foreign_disconnect(struct ieee80211com *,
+	    const struct ieee80211_frame *);
 extern	int ieee80211_classify(struct ieee80211com *, mbuf_t);
 extern	void ieee80211_inputm(struct _ifnet *, mbuf_t,
 		struct ieee80211_node *, struct ieee80211_rxinfo *,

@@ -43,7 +43,7 @@ public:
     IOReturn setCLEAR_PMKSA_CACHE(void*) override;
     IOReturn setDYNAMIC_RSSI_WINDOW_CONFIG(apple80211_dynamic_rssi_window_config*) override { return kIOReturnUnsupported; }
     IOReturn setBSS_BLACKLIST(bss_blacklist*) override { return kIOReturnUnsupported; }
-    IOReturn setWCL_LEGACY_ROAM_PROFILE_CONFIG(apple80211_legacy_roam_profile_config*) override { return kIOReturnUnsupported; }
+    IOReturn setWCL_LEGACY_ROAM_PROFILE_CONFIG(apple80211_legacy_roam_profile_config *p) override { return p ? kIOReturnSuccess : kIOReturnBadArgument; }
     IOReturn setWCL_ARP_MODE(apple80211_wcl_arp_mode*) override { return kIOReturnUnsupported; }
     IOReturn setWCL_QOS_PARAMS(apple80211_wcl_qos_params*) override { return kIOReturnUnsupported; }
     IOReturn setVOICE_IND_STATE(apple80211_voice_ind_state*) override { return kIOReturnUnsupported; }
@@ -100,7 +100,7 @@ public:
     IOReturn setMacAddress(mloAddrArray &) override;
 #endif
     IOReturn getROAM_PROFILE(apple80211_roam_profile_all_bands *) override { return kIOReturnUnsupported; }
-    IOReturn setROAM_PROFILE(apple80211_roam_profile_all_bands *) override { return kIOReturnUnsupported; }
+    IOReturn setROAM_PROFILE(apple80211_roam_profile_all_bands *p) override { return p ? kIOReturnSuccess : kIOReturnBadArgument; }
 #if __IO80211_TARGET != __MAC_15_2
     IOReturn setWCL_JOIN_ABORT(apple80211_wcl_abort_join *) override;
 #endif
@@ -155,7 +155,7 @@ public:
     virtual IOReturn getCURRENT_NETWORK(apple80211_scan_result *) AIRPORT_SKYWALK_OVERRIDE;
     virtual IOReturn getRSSI_BOUNDS(apple80211_rssi_bounds_data *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn getPOWER_DEBUG_INFO(apple80211_power_debug_info *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
-    virtual IOReturn getHT_CAPABILITY(apple80211_ht_capability *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+    virtual IOReturn getHT_CAPABILITY(apple80211_ht_capability *) AIRPORT_SKYWALK_OVERRIDE;
     virtual IOReturn getLINK_CHANGED_EVENT_DATA(apple80211_link_changed_event_data *) AIRPORT_SKYWALK_OVERRIDE;
     virtual IOReturn getEXTENDED_STATS(apple80211_extended_stats *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn getBEACON_PERIOD(apple80211_beacon_period_data *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
@@ -167,7 +167,7 @@ public:
 #else
     virtual IOReturn getCHANNELS_INFO(apple80211_channels_info *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
 #endif
-    virtual IOReturn getVHT_CAPABILITY(apple80211_vht_capability *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+    virtual IOReturn getVHT_CAPABILITY(apple80211_vht_capability *) AIRPORT_SKYWALK_OVERRIDE;
     virtual IOReturn getBGSCAN_CACHE_RESULTS(apple80211_bgscan_cached_network_data_list *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn getROAM_PROFILE(apple80211_roam_profile_band_data *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn getCHIP_COUNTER_STATS(apple80211_chip_stats *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
@@ -219,7 +219,11 @@ public:
     virtual IOReturn getCUR_PMK(apple80211_pmk *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn getDYNSAR_DETAIL(apple80211_dynsar_detail *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn getRANDOMISATION_STATUS(apple80211_mac_randomisation_status *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#ifdef AIRPORT_WCL
+    IOReturn getCOUNTRY_CHANNELS_INFO(apple80211_channels_info *) override;
+#else
     virtual IOReturn getCOUNTRY_CHANNELS_INFO(apple80211_channels_info *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#endif
     virtual IOReturn getLQM_SUMMARY(apple80211_lqm_summary *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn getCOLOCATED_NETWORK_SCOPE_ID(apple80211_colocated_network_scope_id *) AIRPORT_SKYWALK_OVERRIDE;
     virtual IOReturn getBEACON_SCAN_CACHE_REQ(apple80211_scan_result *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
@@ -337,11 +341,19 @@ public:
     virtual IOReturn setSOFTAP_TRIGGER_CSA(apple80211_softap_csa_params *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setSOFTAP_WIFI_NETWORK_INFO_IE(apple80211_softap_wifi_network_info *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setBTCOEX_DISABLE_ULOFDMA(uint *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#ifdef AIRPORT_WCL
+    virtual IOReturn setSCAN_CONTROL(apple80211_scan_control_params *) AIRPORT_SKYWALK_OVERRIDE;
+#else
     virtual IOReturn setSCAN_CONTROL(apple80211_scan_control_params *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#endif
     virtual IOReturn setUSB_HOST_NOTIFICATION(apple80211_usb_host_notification_data *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setSET_MAC_ADDRESS(apple80211_set_mac_address *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setHP2P_CTRL(apple80211_hp2p_ctrl *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#ifdef AIRPORT_WCL
+    virtual IOReturn setABORT_SCAN(apple80211_abort_scan *) AIRPORT_SKYWALK_OVERRIDE;
+#else
     virtual IOReturn setABORT_SCAN(apple80211_abort_scan *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#endif
     virtual IOReturn setSET_PROPERTY(apple80211_set_property_unserialized_data *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setROAM_CACHE_UPDATE(apple80211_roam_cache_data *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setPM_MODE(apple80211_pm_mode *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
@@ -361,9 +373,13 @@ public:
     virtual IOReturn setWCL_LEAVE_NETWORK(apple80211_leave_network *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
 #endif
     virtual IOReturn setWCL_REASSOC(apple80211_reassoc *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#ifdef AIRPORT_WCL
+    IOReturn setWCL_SET_ROAM_LOCK(apple80211_set_roam_lock *) override;
+#else
     virtual IOReturn setWCL_SET_ROAM_LOCK(apple80211_set_roam_lock *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
-    virtual IOReturn setWCL_ROAM_PROFILE_CONFIG(apple80211_roam_profile_config *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
-    virtual IOReturn setWCL_ROAM_PROFILE_CONFIGV1(apple80211_roam_profile_configV1 *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#endif
+    virtual IOReturn setWCL_ROAM_PROFILE_CONFIG(apple80211_roam_profile_config *p) AIRPORT_SKYWALK_OVERRIDE { return p ? kIOReturnSuccess : kIOReturnBadArgument; }
+    virtual IOReturn setWCL_ROAM_PROFILE_CONFIGV1(apple80211_roam_profile_configV1 *p) AIRPORT_SKYWALK_OVERRIDE { return p ? kIOReturnSuccess : kIOReturnBadArgument; }
     virtual IOReturn setWCL_ROAM_USER_CACHE(apple80211_user_roam_cache *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setWCL_SET_MULTI_AP_ENV(apple80211_set_multi_ap_env *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
 #ifdef AIRPORT_WCL
@@ -371,7 +387,11 @@ public:
 #else
     virtual IOReturn setWCL_SCAN_ABORT(void *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
 #endif
+#ifdef AIRPORT_WCL
+    IOReturn setWCL_REAL_TIME_MODE(apple80211_wcl_real_time_mode *) override;
+#else
     virtual IOReturn setWCL_REAL_TIME_MODE(apple80211_wcl_real_time_mode *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#endif
     virtual IOReturn setWCL_GARP_MODE(apple80211_wcl_garp_mode *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
 #if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
     IOReturn setWCL_JOIN_ABORT(void *) override;
@@ -409,10 +429,17 @@ public:
     virtual IOReturn setMOVING_NETWORK(apple80211_network_flags *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setBATTERY_POWERSAVE_CONFIG(apple80211_battery_ps_config *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setMIMO_CONFIG(apple80211_mimo_config *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#ifdef AIRPORT_WCL
+    virtual IOReturn setWCL_CONFIG_BG_MOTIONPROFILE(apple80211_bg_motion_profile *) override;
+    virtual IOReturn setWCL_CONFIG_BG_NETWORK(apple80211_bg_network *) override;
+    virtual IOReturn setWCL_CONFIG_BGSCAN(apple80211_bg_scan *) override;
+    virtual IOReturn setWCL_CONFIG_BG_PARAMS(apple80211_bg_params *) override;
+#else
     virtual IOReturn setWCL_CONFIG_BG_MOTIONPROFILE(apple80211_bg_motion_profile *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setWCL_CONFIG_BG_NETWORK(apple80211_bg_network *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setWCL_CONFIG_BGSCAN(apple80211_bg_scan *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     virtual IOReturn setWCL_CONFIG_BG_PARAMS(apple80211_bg_params *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
+#endif
     virtual IOReturn setBLOCKED_BANDS(apple80211_blocked_bands *) AIRPORT_SKYWALK_OVERRIDE { return kIOReturnUnsupported; }
     
 #ifdef AIRPORT_WCL
@@ -422,6 +449,15 @@ public:
     void handleWCLEvent(int, void *);
     void handleWCLLink(bool);
     void completeWCLScan();
+    void abortScanForContinuityMedia();
+#if __IO80211_TARGET == __MAC_15_2
+    IOReturn reportDetailedLinkStatus(if_link_status const *) override;
+    void syncInfraDataBandwidths();
+#endif
+#else
+    void abortScanForContinuityMedia() {}
+#endif
+#ifdef AIRPORT_WCL
 private:
     static IOReturn wclCommand(OSObject *, void *, void *, void *, void *);
     struct CountryUpdate;
@@ -429,10 +465,14 @@ private:
     static IOReturn wclCountryUpdateGated(OSObject *, void *, void *, void *, void *);
     static IOReturn stopWCLGated(OSObject *, void *, void *, void *, void *);
     static IOReturn updateWCLLinkQualityGated(OSObject *, void *, void *, void *, void *);
-    void deferWCLCountryUpdate();
+    void deferWCLCountryUpdate(bool = false);
     void updateWCLLinkQuality(bool = false);
     static void wclJoinTimeout(OSObject *, IOTimerEventSource *);
     IOReturn beginWCLScan(apple80211ScanRequest *);
+    bool completeWCLScanFromCache(const AirportWCL::ScanRequest &);
+    IOReturn startWCLScan(const AirportWCL::ScanRequest &);
+    void resumeWCLScan();
+    void handleWCLAvailability(bool ready);
     void clearWCLPMKSA();
     IOReturn installWCLKey(apple80211_key *);
     IOReturn accessWCLRSN(apple80211_rsn_ie_data *, bool);
@@ -443,12 +483,14 @@ private:
     IOReturn leaveWCLNetwork();
     void finishWCLScan(IOReturn);
     void finishWCLJoin(uint16_t, uint16_t, IOReturn);
-    void publishWCLBeacon(const ieee80211_node *, const uint8_t *, size_t);
+    void publishWCLBeacon(const ieee80211_node *, const uint8_t *, size_t, bool isProbe = false);
     IOTimerEventSource *joinTimer;
     uint8_t joinBSSID[6];
     bool scanPending;
     bool scanCompleted;
     bool scanSkipCompletion;
+    bool scanDeferred = false;
+    AirportWCL::ScanRequest wclScanRequest = {};
     bool wclBssValid;
     bool wclLinkIndicated;
     uint8_t wclBssInfo[sizeof(AirportWCL::BeaconMetadata) + 0x800];
@@ -464,8 +506,15 @@ private:
     bool assocNotified;
     bool firstBeaconNotified;
     bool portAuthorized;
+    bool wclRoamLock = false;
+    bool wclRealTimeMode = false;
+    uint64_t wclLastReportedRateBps = 0;
+    uint64_t wclLastLiveBgscanUS = 0;
     uint8_t wclPermanentMAC[6] = {};
     bool wclStopping;
+    uint64_t wclCountryGeneration = 0;
+    uint64_t wclChannelReadSerial = 0;
+    uint64_t wclCountryReloadPending = 0;
 #endif
 
 private:
@@ -473,9 +522,8 @@ private:
     ItlHalService *fHalService;
     
     //IO80211
-    struct ieee80211_node *fNextNodeToSend;
+    struct ieee80211_scan_cursor scanCursor = {};
     IOTimerEventSource *scanSource;
-    bool fScanResultWrapping;
     
     u_int32_t current_authtype_lower;
     u_int32_t current_authtype_upper;

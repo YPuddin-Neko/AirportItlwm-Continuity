@@ -14,6 +14,9 @@
 
 #include "AirportItlwmSkywalkInterface.hpp"
 #include "IOPCIEDeviceWrapper.hpp"
+#ifdef KERNEL
+extern "C" errno_t ifnet_set_sndq_maxlen(ifnet_t interface, u_int32_t maxqlen);
+#endif
 
 #define super IO80211Controller
 OSDefineMetaClassAndStructors(AirportItlwm, IO80211Controller);
@@ -465,6 +468,16 @@ bool AirportItlwm::start(IOService *provider)
     bsdInterface->registerService();
 #endif
     registerService();
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    if (OSDynamicCast(ItlIwx, fHalService)) {
+        const bool awdlOk = startAWDLInterface();
+        setProperty("AWDLInterfaceAttached", awdlOk);
+        if (awdlOk) {
+            setProperty("LLWInterfaceAttached", startLLWInterface());
+            if (awdlBSD) awdlBSD->registerService();
+        }
+    }
+#endif
     return true;
 }
 
@@ -472,6 +485,10 @@ void AirportItlwm::stop(IOService *provider)
 {
     XYLog("%s\n", __PRETTY_FUNCTION__);XYLog("%s\n", __PRETTY_FUNCTION__);
     struct _ifnet *ifp = &fHalService->get80211Controller()->ic_ac.ac_if;
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    stopLLWInterface();
+    stopAWDLInterface();
+#endif
 #ifdef AIRPORT_WCL
     if (fNetIf)
         static_cast<AirportItlwmSkywalkInterface *>(fNetIf)->stopWCL();
@@ -544,7 +561,7 @@ IOReturn AirportItlwm::enable(IO80211SkywalkInterface *netif)
     XYLog("%s\n", __PRETTY_FUNCTION__);
     super::enable(netif);
     _fCommandGate->enable();
-    if (power_state)
+    if (power_state && pmPowerState == kPowerStateOn)
         enableAdapter(bsdInterface);
     return kIOReturnSuccess;
 }
@@ -566,6 +583,11 @@ bool AirportItlwm::configureInterface(IONetworkInterface *netif)
         XYLog("super failed\n");
         return false;
     }
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    if (creatingAWDL || creatingLLW)
+        return netif->configureOutputPullModel(256, kIONetworkWorkLoopSynchronous, 0,
+            IOEthernetInterface::kOutputPacketSchedulingModelNormal, 0) == kIOReturnSuccess;
+#endif
 
     nd = netif->getParameter(kIONetworkStatsKey);
     if (!nd || !(fpNetStats = (IONetworkStats *)nd->getBuffer())) {
@@ -577,7 +599,8 @@ bool AirportItlwm::configureInterface(IONetworkInterface *netif)
     fpNetStats->collisions = 0;
 #ifdef __PRIVATE_SPI__
 #ifdef AIRPORT_WCL
-    if (netif->configureOutputPullModel(fHalService->getDriverInfo()->getTxQueueSize(),
+    const UInt32 pullQueueSize = MAX(2048U, fHalService->getDriverInfo()->getTxQueueSize());
+    if (netif->configureOutputPullModel(pullQueueSize,
         kIONetworkWorkLoopSynchronous, 0,
         IOEthernetInterface::kOutputPacketSchedulingModelNormal, 0) != kIOReturnSuccess)
         return false;
@@ -594,7 +617,12 @@ IONetworkInterface *AirportItlwm::createInterface()
     AirportItlwmEthernetInterface *netif = new AirportItlwmEthernetInterface;
     if (!netif)
         return NULL;
-    if (!netif->initWithSkywalkInterfaceAndProvider(this, fNetIf)) {
+    IO80211SkywalkInterface *skywalk = fNetIf;
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    if (creatingAWDL) skywalk = awdlInterface;
+    else if (creatingLLW) skywalk = llwInterface;
+#endif
+    if (!netif->initWithSkywalkInterfaceAndProvider(this, skywalk)) {
         netif->release();
         return NULL;
     }
@@ -611,7 +639,7 @@ bool AirportItlwm::createMediumTables(const IONetworkMedium **primary)
         return false;
     }
 
-    medium = IONetworkMedium::medium(kIOMediumIEEE80211, 54000000);
+    medium = IONetworkMedium::medium(kIOMediumIEEE80211, 1733300000ULL);
     IONetworkMedium::addMedium(mediumDict, medium);
     medium->release();
     if (primary) {
@@ -638,11 +666,39 @@ IOReturn AirportItlwm::selectMedium(const IONetworkMedium *medium) {
 bool AirportItlwm::
 setLinkStatus(UInt32 status, const IONetworkMedium * activeMedium, UInt64 speed, OSData * data)
 {
-    struct _ifnet *ifq = &fHalService->get80211Controller()->ic_ac.ac_if;
+    struct ieee80211com *ic = fHalService->get80211Controller();
+    struct _ifnet *ifq = &ic->ic_ac.ac_if;
+    if ((status & kIONetworkLinkActive) && !speed) {
+        speed = (ic->ic_bss && ic->ic_bss->ni_txrate_kbps) ?
+            (uint64_t(ic->ic_bss->ni_txrate_kbps) * 1000ULL) : 866700000ULL;
+    }
     if (status == currentStatus) {
+        if ((status & kIONetworkLinkActive) && speed) {
+            super::setLinkStatus(status, activeMedium ? activeMedium : getCurrentMedium(), speed, data);
+            if (bsdInterface && bsdInterface->getIfnet()) {
+                ifnet_set_baudrate(bsdInterface->getIfnet(), speed);
+#if defined(KERNEL) && defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+                ifnet_set_sndq_maxlen(bsdInterface->getIfnet(), 2048);
+#endif
+            }
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+            if (fNetIf)
+                static_cast<AirportItlwmSkywalkInterface *>(fNetIf)->syncInfraDataBandwidths();
+#endif
+        }
         return true;
     }
     bool ret = super::setLinkStatus(status, activeMedium, speed, data);
+    if ((status & kIONetworkLinkActive) && speed && bsdInterface && bsdInterface->getIfnet()) {
+        ifnet_set_baudrate(bsdInterface->getIfnet(), speed);
+#if defined(KERNEL) && defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+        ifnet_set_sndq_maxlen(bsdInterface->getIfnet(), 2048);
+#endif
+    }
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    if ((status & kIONetworkLinkActive) && fNetIf)
+        static_cast<AirportItlwmSkywalkInterface *>(fNetIf)->syncInfraDataBandwidths();
+#endif
     currentStatus = status;
     if (fNetIf) {
         if (status & kIONetworkLinkActive) {
@@ -692,18 +748,28 @@ setLinkStateGated(OSObject *target, void *arg0, void *arg1, void *arg2, void *ar
 #ifdef __PRIVATE_SPI__
 IOReturn AirportItlwm::outputStart(IONetworkInterface *interface, IOOptionBits options)
 {
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    if (interface == awdlBSD) {
+        return awdlInterface ? awdlInterface->submitOutputPackets(false) : kIOReturnNoResources;
+    }
+    if (interface == llwBSD) {
+        return awdlInterface ? awdlInterface->submitOutputPackets(true) : kIOReturnNoResources;
+    }
+#endif
     struct _ifnet *ifp = &fHalService->get80211Controller()->ic_ac.ac_if;
     mbuf_t m = NULL;
 #ifdef AIRPORT_WCL
     if (!ifp->if_snd.queue)
         return kIOReturnNoResources;
-    if (!ifq_empty(&ifp->if_snd))
+    if (!ifq_empty(&ifp->if_snd) && !ifq_is_oactive(&ifp->if_snd))
         (*ifp->if_start)(ifp);
-    const uint32_t capacity = ifp->if_snd.queue->getCapacity();
-    const uint32_t queued = ifq_len(&ifp->if_snd);
-    if (ifq_is_oactive(&ifp->if_snd) || queued >= capacity)
+    if (ifq_is_oactive(&ifp->if_snd))
         return kIOReturnNoResources;
-    const uint32_t count = MIN(32U, capacity - queued);
+    const uint32_t capacity = MIN(64U, ifp->if_snd.queue->getCapacity());
+    const uint32_t queued = ifq_len(&ifp->if_snd);
+    if (queued >= capacity)
+        return kIOReturnNoResources;
+    const uint32_t count = MIN(64U, capacity - queued);
     if (interface->dequeueOutputPackets(count, &m) != kIOReturnSuccess || !m)
         return kIOReturnSuccess;
     while (m) {
@@ -712,8 +778,9 @@ IOReturn AirportItlwm::outputStart(IONetworkInterface *interface, IOOptionBits o
         enqueuePacket(m);
         m = next;
     }
-    (*ifp->if_start)(ifp);
-    if (ifq_is_oactive(&ifp->if_snd))
+    if (!ifq_is_oactive(&ifp->if_snd))
+        (*ifp->if_start)(ifp);
+    if (ifq_is_oactive(&ifp->if_snd) || ifq_len(&ifp->if_snd) >= capacity)
         return kIOReturnNoResources;
     return kIOReturnSuccess;
 #else
@@ -755,7 +822,8 @@ UInt32 AirportItlwm::outputPacket(mbuf_t m, void *param)
 IOReturn AirportItlwm::outputPacketGated(OSObject *owner, void *arg0, void *, void *, void *)
 {
     auto self = static_cast<AirportItlwm *>(owner);
-    UInt32 status = self->enqueuePacket(static_cast<mbuf_t>(arg0));
+    auto m = static_cast<mbuf_t>(arg0);
+    UInt32 status = self->enqueuePacket(m);
     auto ifp = &self->fHalService->get80211Controller()->ic_ac.ac_if;
     if (ifp->if_snd.queue)
         (*ifp->if_start)(ifp);
@@ -989,6 +1057,19 @@ getCARD_CAPABILITIES(OSObject *object,
     cd->capabilities[2] = (1 << (APPLE80211_CAP_WME - 16)) |
         (1 << (APPLE80211_CAP_SHORT_GI_40MHZ - 16)) |
         (1 << (APPLE80211_CAP_SHORT_GI_20MHZ - 16));
+    // IO80211AWDLPeerManager uses byte 3 bit 5 to enable 5 GHz social channels.
+    const auto modes = fHalService->get80211Controller()->ic_modecaps;
+    if ((modes & (1 << IEEE80211_MODE_11A)) &&
+        (modes & ((1 << IEEE80211_MODE_11B) | (1 << IEEE80211_MODE_11G))))
+        cd->capabilities[3] |= 0x20;
+#if __IO80211_TARGET == __MAC_15_2
+    // CHANNELS_INFO supplies the current restrictions on autonomous AWDL transmission.
+    if (OSDynamicCast(ItlIwx, fHalService)) {
+        cd->capabilities[7] |= 0x80;
+        // Apple80211Scan uses the WCL SSID list instead of legacy multi-scan.
+        cd->capabilities[9] |= 0x02;
+    }
+#endif
     // Tahoe WCLDeviceConfiguration::isHeSupported reads byte 17, bit 7.
     // WCL uses this capability together with the BSS HE IE for PHY reporting.
     if (caps & IEEE80211_C_HE)
@@ -1370,17 +1451,66 @@ IOReturn AirportItlwm::registerWithPolicyMaker(IOService *policyMaker)
     return ret;
 }
 
+#ifndef PCI_MSI_FLAGS
+#define PCI_MSI_FLAGS         2
+#define PCI_CAP_ID_MSI        0x05
+#define PCI_MSIX_FLAGS        2
+#define PCI_CAP_ID_MSIX       0x11
+#define PCI_MSIX_FLAGS_ENABLE 0x8000
+#define PCI_MSI_FLAGS_ENABLE  0x0001
+#endif
+
+void AirportItlwm::restorePCIPowerState(IOPCIDevice *provider)
+{
+    if (!provider)
+        return;
+    if (!pmPCICapPtr)
+        provider->findPCICapability(kIOPCIPowerManagementCapability, &pmPCICapPtr);
+    if (pmPCICapPtr) {
+        provider->configWrite16(pmPCICapPtr + 4, 0x8000);
+        IOSleep(10);
+    }
+    provider->configWrite8(0x41, 0);
+    UInt16 reg16 = provider->configRead16(kIOPCIConfigCommand);
+    reg16 |= (kIOPCICommandBusMaster |
+              kIOPCICommandMemorySpace |
+              kIOPCICommandMemWrInvalidate);
+    reg16 &= ~(kIOPCICommandIOSpace | kIOPCICommandInterruptDisable);
+    provider->configWrite16(kIOPCIConfigCommand, reg16);
+    UInt8 msixCap = 0;
+    provider->findPCICapability(PCI_CAP_ID_MSIX, &msixCap);
+    if (msixCap) {
+        UInt16 msixCtrl = provider->configRead16(msixCap + PCI_MSIX_FLAGS);
+        msixCtrl &= ~PCI_MSIX_FLAGS_ENABLE;
+        provider->configWrite16(msixCap + PCI_MSIX_FLAGS, msixCtrl);
+    }
+    UInt8 msiCap = 0;
+    provider->findPCICapability(PCI_CAP_ID_MSI, &msiCap);
+    if (msiCap) {
+        UInt16 msiCtrl = provider->configRead16(msiCap + PCI_MSI_FLAGS);
+        msiCtrl |= PCI_MSI_FLAGS_ENABLE;
+        provider->configWrite16(msiCap + PCI_MSI_FLAGS, msiCtrl);
+    }
+}
+
 void AirportItlwm::setPowerStateOff()
 {
     XYLog("%s\n", __FUNCTION__);
     pmPowerState = kPowerStateOff;
     disableAdapter(bsdInterface);
-    pmPolicyMaker->acknowledgeSetPowerState();
+    if (pmPolicyMaker)
+        pmPolicyMaker->acknowledgeSetPowerState();
 }
 
 void AirportItlwm::setPowerStateOn()
 {
     XYLog("%s\n", __FUNCTION__);
+    restorePCIPowerState(pciNub);
     pmPowerState = kPowerStateOn;
-    pmPolicyMaker->acknowledgeSetPowerState();
+    if (power_state && bsdInterface && fHalService) {
+        if (enableAdapter(bsdInterface) == kIOReturnSuccess)
+            fHalService->resumeAdapter();
+    }
+    if (pmPolicyMaker)
+        pmPolicyMaker->acknowledgeSetPowerState();
 }

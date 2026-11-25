@@ -179,7 +179,9 @@ iwm_lmac_scan_fill_channels(struct iwm_softc *sc,
 #ifdef AIRPORT_WCL
         if (!AirportWCL::scanChannelSelected(ic->ic_wcl_scan_channels,
                 ic->ic_wcl_scan_requested && ic->ic_wcl_scan_restricted,
-                ieee80211_chan2ieee(ic, c)))
+                ieee80211_chan2ieee(ic, c),
+                !bgscan && ic->ic_wcl_join_requested && !ic->ic_wcl_scan_requested ?
+                    ic->ic_wcl_join_channel : 0))
             continue;
 #endif
         
@@ -218,7 +220,9 @@ iwm_umac_scan_fill_channels(struct iwm_softc *sc,
 #ifdef AIRPORT_WCL
         if (!AirportWCL::scanChannelSelected(ic->ic_wcl_scan_channels,
                 ic->ic_wcl_scan_requested && ic->ic_wcl_scan_restricted,
-                ieee80211_chan2ieee(ic, c)))
+                ieee80211_chan2ieee(ic, c),
+                !bgscan && ic->ic_wcl_join_requested && !ic->ic_wcl_scan_requested ?
+                    ic->ic_wcl_join_channel : 0))
             continue;
 #endif
         
@@ -418,6 +422,7 @@ iwm_lmac_scan(struct iwm_softc *sc, int bgscan)
     }
 #ifdef AIRPORT_WCL
     req->max_out_time = htole32(timing.maxOutTU);
+    req->suspend_time = htole32(timing.suspendTU);
 #endif
     req->scan_prio = htole32(IWM_SCAN_PRIORITY_HIGH);
     req->rx_chain_select = iwm_scan_rx_chain(sc);
@@ -715,10 +720,11 @@ iwm_umac_scan(struct iwm_softc *sc, int bgscan)
     }
     
     if (bgscan) {
-        const uint32_t timeout = htole32(120);
 #ifdef AIRPORT_WCL
+        const uint32_t timeout = htole32(timing.suspendTU);
         const uint32_t maxOut = htole32(timing.maxOutTU);
 #else
+        const uint32_t timeout = htole32(120);
         const uint32_t maxOut = timeout;
 #endif
         if (isset(sc->sc_ucode_api,
@@ -965,6 +971,11 @@ iwm_scan(struct iwm_softc *sc)
         return err;
     }
     
+#ifdef AIRPORT_WCL
+    // A missing or moved AP must fall back to all channels on the next scan.
+    ic->ic_wcl_join_channel = 0;
+#endif
+
     /*
      * The current mode might have been fixed during association.
      * Ensure all channels get scanned.

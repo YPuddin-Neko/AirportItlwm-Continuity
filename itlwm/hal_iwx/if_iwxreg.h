@@ -1385,6 +1385,7 @@ enum iwx_msix_ivar_for_cause {
 #define IWX_UCODE_TLV_CAPA_P2P_STANDALONE_UAPSD        26
 #define IWX_UCODE_TLV_CAPA_BT_COEX_PLCR            28
 #define IWX_UCODE_TLV_CAPA_LAR_MULTI_MCC        29
+#define IWX_UCODE_TLV_CAPA_MCC_UPDATE_11AX_SUPPORT 89
 #define IWX_UCODE_TLV_CAPA_BT_COEX_RRC            30
 #define IWX_UCODE_TLV_CAPA_GSCAN_SUPPORT        31
 #define IWX_UCODE_TLV_CAPA_NAN_SUPPORT            34
@@ -1392,6 +1393,7 @@ enum iwx_msix_ivar_for_cause {
 #define IWX_UCODE_TLV_CAPA_BINDING_CDB_SUPPORT        39
 #define IWX_UCODE_TLV_CAPA_CDB_SUPPORT            40
 #define IWX_UCODE_TLV_CAPA_TLC_OFFLOAD                  43
+#define IWX_UCODE_TLV_CAPA_COEX_SCHEMA_2 45
 #define IWX_UCODE_TLV_CAPA_DYNAMIC_QUOTA                44
 #define IWX_UCODE_TLV_CAPA_ULTRA_HB_CHANNELS        48
 #define IWX_UCODE_TLV_CAPA_CS_MODIFY                49
@@ -1953,6 +1955,8 @@ struct iwx_tx_queue_cfg_rsp {
 #define IWX_BT_COEX_PROT_ENV    0xcd
 #define IWX_BT_PROFILE_NOTIFICATION    0xce
 #define IWX_BT_COEX_CI    0x5d
+#define IWX_BT_COEX_UPDATE_REDUCED_TXP 0x5c
+#define IWX_RLC_CONFIG_CMD 0x8
 
 #define IWX_REPLY_SF_CFG_CMD        0xd1
 #define IWX_REPLY_BEACON_FILTERING_CMD    0xd2
@@ -2182,7 +2186,7 @@ struct iwx_temp_report_ths_cmd {
  * @IWX_NVM_CHANNEL_INDOOR_ONLY: only indoor use is allowed
  * @IWX_NVM_CHANNEL_GO_CONCURRENT: GO operation is allowed when connected to BSS
  *    on same channel on 2.4 or same UNII band on 5.2
- * @IWX_NVM_CHANNEL_DFS: dynamic freq selection candidate
+ * @IWX_NVM_CHANNEL_UNIFORM: uniform spreading required
  * @IWX_NVM_CHANNEL_WIDE: 20 MHz channel okay (?)
  * @IWX_NVM_CHANNEL_40MHZ: 40 MHz channel okay (?)
  * @IWX_NVM_CHANNEL_80MHZ: 80 MHz channel okay (?)
@@ -2195,7 +2199,7 @@ struct iwx_temp_report_ths_cmd {
 #define IWX_NVM_CHANNEL_RADAR    (1 << 4)
 #define IWX_NVM_CHANNEL_INDOOR_ONLY    (1 << 5)
 #define IWX_NVM_CHANNEL_GO_CONCURRENT    (1 << 6)
-#define IWX_NVM_CHANNEL_DFS    (1 << 7)
+#define IWX_NVM_CHANNEL_UNIFORM    (1 << 7)
 #define IWX_NVM_CHANNEL_WIDE    (1 << 8)
 #define IWX_NVM_CHANNEL_40MHZ    (1 << 9)
 #define IWX_NVM_CHANNEL_80MHZ    (1 << 10)
@@ -7811,6 +7815,26 @@ struct iwx_wep_key_cmd {
  * BT coex
  */
 
+struct iwx_rlc_properties {
+    uint32_t rx_chain_info;
+    uint32_t reserved;
+} __packed;
+struct iwx_sad_properties {
+    uint32_t chain_a_sad_mode, chain_b_sad_mode, mac_id, reserved;
+} __packed;
+struct iwx_rlc_config_cmd {
+    uint32_t phy_id;
+    struct iwx_rlc_properties rlc;
+    struct iwx_sad_properties sad;
+    uint8_t flags, reserved[3];
+} __packed; /* RLC_CONFIG_CMD_API_S_VER_2 */
+
+#define IWX_BT_REDUCED_TX_POWER_BIT (1 << 7)
+
+struct iwx_bt_coex_reduced_txp_update_cmd {
+    uint32_t reduced_txp;
+} __packed; /* BT_COEX_UPDATE_REDUCED_TX_POWER_API_S_VER_1 */
+
 #define IWX_BT_COEX_DISABLE        0x0
 #define IWX_BT_COEX_NW            0x1
 #define IWX_BT_COEX_BT            0x2
@@ -7835,6 +7859,22 @@ struct iwx_bt_coex_cmd {
     uint32_t mode;
     uint32_t enabled_modules;
 } __packed; /* BT_COEX_CMD_API_S_VER_6 */
+
+/* Intel iwlwifi fw/api/coex.h, BT_CI_MSG_API_S_VER_2. */
+struct iwx_bt_coex_ci_cmd {
+    uint64_t bt_primary_ci;
+    uint32_t primary_ch_phy_id;
+    uint64_t bt_secondary_ci;
+    uint32_t secondary_ch_phy_id;
+} __packed;
+
+/* BT_COEX_PROFILE_NTFY_API_S_VER_4. */
+struct iwx_bt_coex_profile_notif {
+    uint32_t mbox_msg[4], msg_idx, bt_ci_compliance;
+    uint32_t primary_ch_lut, secondary_ch_lut, bt_activity_grading;
+    uint8_t ttc_status, rrc_status;
+    uint16_t reserved;
+} __packed;
 
 
 /*

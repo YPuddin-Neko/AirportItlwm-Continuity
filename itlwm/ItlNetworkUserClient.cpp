@@ -15,6 +15,8 @@
 #include "ItlNetworkUserClient.hpp"
 #include <sys/_netstat.h>
 
+extern IOCommandGate *_fCommandGate;
+
 #define super IOUserClient
 OSDefineMetaClassAndStructors( ItlNetworkUserClient, IOUserClient );
 
@@ -81,7 +83,7 @@ IOReturn ItlNetworkUserClient::externalMethod(uint32_t selector, IOExternalMetho
     bool isSet = selector & IOCTL_MASK;
     selector &= ~IOCTL_MASK;
 //    IOLog("externalMethod invoke. selector=0x%X isSet=%d\n", selector, isSet);
-    if (selector < 0 || selector > IOCTL_ID_MAX) {
+    if (selector >= IOCTL_ID_MAX) {
         return super::externalMethod(selector, arguments, NULL, this, NULL);
     }
     void *data = isSet ? (void *)arguments->structureInput : (void *)arguments->structureOutput;
@@ -357,6 +359,12 @@ IOReturn ItlNetworkUserClient::
 sSCAN(OSObject* target, void* data, bool isSet)
 {
     ItlNetworkUserClient *that = OSDynamicCast(ItlNetworkUserClient, target);
+    if (!that->fDriver->getWorkLoop()->inGate())
+        return _fCommandGate->runAction(
+            [](OSObject *, void *arg0, void *arg1, void *arg2, void *) -> IOReturn {
+                return sSCAN(static_cast<OSObject *>(arg0), arg1, arg2 != nullptr);
+            }, target, data, reinterpret_cast<void *>(uintptr_t(isSet)));
+    that->scanCursor = {};
     ieee80211_begin_cache_bgscan(that->fIfp);
     return kIOReturnSuccess;
 }
@@ -365,38 +373,32 @@ IOReturn ItlNetworkUserClient::
 sSCAN_RESULT(OSObject* target, void* data, bool isSet)
 {
     ItlNetworkUserClient *that = OSDynamicCast(ItlNetworkUserClient, target);
+    if (!that->fDriver->getWorkLoop()->inGate())
+        return _fCommandGate->runAction(
+            [](OSObject *, void *arg0, void *arg1, void *arg2, void *) -> IOReturn {
+                return sSCAN_RESULT(static_cast<OSObject *>(arg0), arg1, arg2 != nullptr);
+            }, target, data, reinterpret_cast<void *>(uintptr_t(isSet)));
     struct ioctl_network_info *ni = (struct ioctl_network_info *)data;
     ieee80211com *ic = that->fDriver->fHalService->get80211Controller();
-    if (that->fNextNodeToSend == NULL) {
-        if (that->fScanResultWrapping) {
-            that->fScanResultWrapping = false;
-            return kIONoScanResult;
-        } else {
-            that->fNextNodeToSend = RB_MIN(ieee80211_tree, &ic->ic_tree);
-            if (that->fNextNodeToSend == NULL) {
-                return kIONoScanResult;
-            }
-        }
-    }
+    auto node = ieee80211_scan_next(ic, &that->scanCursor);
+    if (!node)
+        return kIONoScanResult;
     bzero(ni, sizeof(*ni));
     
-    ni->ni_rsncaps = that->fNextNodeToSend->ni_capinfo;;
-    ni->channel = ieee80211_chan2ieee(ic, that->fNextNodeToSend->ni_chan);
-    ni->ni_rsncipher = (enum itl80211_cipher)that->fNextNodeToSend->ni_rsncipher;
-    ni->rsn_akms = that->fNextNodeToSend->ni_rsnakms;
-    ni->rsn_ciphers = that->fNextNodeToSend->ni_rsnciphers;
-    ni->rsn_protos = that->fNextNodeToSend->ni_rsnprotos;
-    ni->rsn_groupcipher = (enum itl80211_cipher)that->fNextNodeToSend->ni_rsngroupcipher;
-    ni->rsn_groupmgmtcipher = (enum itl80211_cipher)that->fNextNodeToSend->ni_rsngroupmgmtcipher;
-    ni->supported_rsnakms = that->fNextNodeToSend->ni_supported_rsnakms;
-    ni->supported_rsnprotos = that->fNextNodeToSend->ni_supported_rsnprotos;
+    ni->ni_rsncaps = node->ni_capinfo;;
+    ni->channel = ieee80211_chan2ieee(ic, node->ni_chan);
+    ni->ni_rsncipher = (enum itl80211_cipher)node->ni_rsncipher;
+    ni->rsn_akms = node->ni_rsnakms;
+    ni->rsn_ciphers = node->ni_rsnciphers;
+    ni->rsn_protos = node->ni_rsnprotos;
+    ni->rsn_groupcipher = (enum itl80211_cipher)node->ni_rsngroupcipher;
+    ni->rsn_groupmgmtcipher = (enum itl80211_cipher)node->ni_rsngroupmgmtcipher;
+    ni->supported_rsnakms = node->ni_supported_rsnakms;
+    ni->supported_rsnprotos = node->ni_supported_rsnprotos;
     ni->noise = 0;
-    ni->rssi = -(0 - IWM_MIN_DBM - that->fNextNodeToSend->ni_rssi);
-    memcpy(ni->bssid, that->fNextNodeToSend->ni_bssid, 6);
-    memcpy(ni->ssid, that->fNextNodeToSend->ni_essid, 32);
-    that->fNextNodeToSend = RB_NEXT(ieee80211_tree, &ic->ic_tree, that->fNextNodeToSend);
-    if (that->fNextNodeToSend == NULL)
-        that->fScanResultWrapping = true;
+    ni->rssi = -(0 - IWM_MIN_DBM - node->ni_rssi);
+    memcpy(ni->bssid, node->ni_bssid, 6);
+    memcpy(ni->ssid, node->ni_essid, 32);
     return kIOReturnSuccess;
 }
 

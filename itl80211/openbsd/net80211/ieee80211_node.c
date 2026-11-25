@@ -1090,6 +1090,17 @@ ieee80211_match_bss(struct ieee80211com *ic, struct ieee80211_node *ni,
     if (ISSET(ic->ic_flags, IEEE80211_F_AUTO_JOIN) &&
         ic->ic_des_esslen == 0)
         fail |= IEEE80211_NODE_ASSOCFAIL_ESSID;
+#ifdef AIRPORT_WCL
+    if (ic->ic_wcl_join_requested &&
+        (ic->ic_flags & IEEE80211_F_DESBSSID) &&
+        IEEE80211_ADDR_EQ(ic->ic_des_bssid, ni->ni_bssid) &&
+        ic->ic_des_esslen != 0 &&
+        (ni->ni_esslen == 0 || ni->ni_essid[0] == '\0')) {
+        ni->ni_esslen = ic->ic_des_esslen;
+        memset(ni->ni_essid, 0, sizeof(ni->ni_essid));
+        memcpy(ni->ni_essid, ic->ic_des_essid, ic->ic_des_esslen);
+    }
+#endif
     if (ic->ic_des_esslen != 0 &&
         (ni->ni_esslen != ic->ic_des_esslen ||
          memcmp(ni->ni_essid, ic->ic_des_essid, ic->ic_des_esslen) != 0))
@@ -2887,8 +2898,11 @@ ieee80211_node_trigger_addba_req(struct ieee80211_node *ni, int tid)
 {
     if (ni->ni_tx_ba[tid].ba_state == IEEE80211_BA_INIT &&
         !timeout_pending(&ni->ni_addba_req_to[tid])) {
-        timeout_add_sec(&ni->ni_addba_req_to[tid],
-                        ni->ni_addba_req_intval[tid]);
+        if (ni->ni_addba_req_intval[tid] <= 1)
+            timeout_add_msec(&ni->ni_addba_req_to[tid], 20);
+        else
+            timeout_add_sec(&ni->ni_addba_req_to[tid],
+                            ni->ni_addba_req_intval[tid]);
     }
 }
 
@@ -3496,6 +3510,26 @@ ieee80211_notify_dtim(struct ieee80211com *ic)
 /*
  * Compare nodes in the tree by lladdr
  */
+/* Call under the HAL gate; keep only a key between scan-result requests. */
+struct ieee80211_node *
+ieee80211_scan_next(struct ieee80211com *ic, struct ieee80211_scan_cursor *cursor)
+{
+    struct ieee80211_node *node = RB_ROOT(&ic->ic_tree), *next = NULL;
+    while (node) {
+        if (!cursor->started ||
+            memcmp(node->ni_macaddr, cursor->last_mac, IEEE80211_ADDR_LEN) > 0) {
+            next = node;
+            node = RB_LEFT(node, ni_node);
+        } else {
+            node = RB_RIGHT(node, ni_node);
+        }
+    }
+    cursor->started = next != NULL;
+    if (next)
+        IEEE80211_ADDR_COPY(cursor->last_mac, next->ni_macaddr);
+    return next;
+}
+
 int
 ieee80211_node_cmp(const struct ieee80211_node *b1,
                    const struct ieee80211_node *b2)

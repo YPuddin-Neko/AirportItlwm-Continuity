@@ -329,7 +329,7 @@ ieee80211_ccmp_get_pn(uint64_t *pn, uint64_t **prsc, mbuf_t m,
 
    wh = mtod(m, struct ieee80211_frame *);
    hdrlen = ieee80211_get_hdrlen(wh);
-   if (mbuf_pkthdr_len(m) < hdrlen + IEEE80211_CCMP_HDRLEN)
+   if (mbuf_len(m) < hdrlen + IEEE80211_CCMP_HDRLEN)
        return EINVAL;
 
    ivp = (u_int8_t *)wh + hdrlen;

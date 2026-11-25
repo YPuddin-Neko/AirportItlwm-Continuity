@@ -124,6 +124,10 @@
 
 #include "if_iwxreg.h"
 #include "if_iwxvar.h"
+#include "TimeEvent.hpp"
+#include "TxQueueSetup.hpp"
+#include "BTCoex.hpp"
+#include "Regulatory.hpp"
 #include <sys/pcireg.h>
 
 #include <IOKit/network/IOEthernetController.h>
@@ -140,11 +144,39 @@
 #include <HAL/ItlHalService.hpp>
 #include <HAL/ItlDriverInfo.hpp>
 #include <HAL/ItlDriverController.hpp>
+#ifdef AIRPORT_WCL
+#include "../../AirportItlwm/AWDL/DataFrame.hpp"
+#include "../../AirportItlwm/AWDL/BlockAck.hpp"
+#include "../../AirportItlwm/AWDL/RadioState.hpp"
+#include "ReceiveClock.hpp"
+#include "AWDLTxBudget.hpp"
+#if DEBUG
+#include "AWDLTxReports.hpp"
+#endif
+#endif
+
+#ifdef AIRPORT_WCL
+struct IwxAWDLReceiveSample {
+    uint64_t ordinal, uptimeUS, epoch;
+    uint32_t status;
+    uint16_t sequenceControl;
+    uint8_t macPhy, macContext, channel, fc0, fc1, tid;
+    uint8_t receiver[6], transmitter[6];
+};
+
+struct IwxAWDLReceiveDiagnostics {
+    static constexpr unsigned Capacity = 8;
+    IwxAWDLReceiveSample samples[Capacity];
+    uint64_t sampled, crcOK, crcBad, overrunOK, overrunBad, sourceFound, sourceMissing;
+};
+#endif
 
 class ItlIwx : public ItlHalService, ItlDriverInfo, ItlDriverController {
     OSDeclareDefaultStructors(ItlIwx)
     
 public:
+    IwxBTCoexState btCoex = {};
+    IwxRegulatoryState regulatory = {};
     
     //kext
     void free() override;
@@ -152,12 +184,101 @@ public:
     virtual void detach(IOPCIDevice *device) override;
     IOReturn enable(IONetworkInterface *netif) override;
     IOReturn disable(IONetworkInterface *netif) override;
+    void resumeAdapter() override;
     virtual struct ieee80211com *get80211Controller() override;
 #ifdef AIRPORT_WCL
+    friend class AirportItlwmAWDLInterface;
     IOReturn setScanHomeAwayTime(uint32_t milliseconds) override {
         com.sc_ic.ic_wcl_scan_away_time_ms = milliseconds;
         return kIOReturnSuccess;
     }
+    bool receiveAWDL(mbuf_t, struct iwx_rx_mpdu_desc *);
+    void observeAWDLReceiveDescriptor(const struct iwx_rx_mpdu_desc *, size_t);
+    void formatAWDLReceiveDiagnostics(char *, size_t) const;
+    uint32_t awdlReceiveDelay(const struct iwx_rx_mpdu_desc *, uint64_t processedUS);
+    void resetAWDLPeers();
+    void publishAWDLReceive();
+    AirportAWDL::ReceiveState awdlReceive;
+    AirportAWDL::PeerTable awdlPeers;
+    AirportAWDL::DataReceiveState awdlData;
+    IwxAWDLReceiveDiagnostics awdlReceiveDiagnostics = {};
+    uint64_t awdlPublishedSecond;
+    AirportAWDL::RadioState awdlRadio = {};
+    AirportAWDL::BlockAckState awdlBA = {};
+    bool awdlHasRXBA() const;
+    int addAWDLBlockAckPeer(unsigned, const uint8_t *);
+    void noteAWDLTXBlockAck(const uint8_t *, size_t, bool acceptedRX = false);
+    bool receiveAWDLTXBlockAck(const uint8_t *, size_t);
+    int serviceAWDLReceiveFilter(uint64_t (*)(const void *, uint64_t), const void *);
+    void serviceAWDLTXBlockAck();
+    int configureAWDLTXStation(bool enabled, bool paused);
+    int configureAWDLPeerWidth();
+    uint8_t awdlTXAntenna();
+    uint8_t awdlTXMcs(uint64_t, unsigned stream = 0) const;
+    uint8_t awdlTXWidth(uint64_t) const;
+    int configureAWDLTXRates();
+    int downgradeAWDLTXRates(uint8_t widthMHz, uint16_t targetChannel = 0);
+    int setAWDLTXWindow(uint64_t (*)(const void *, uint64_t), const void *);
+    bool completeAWDLTXManagement(uint64_t, bool);
+    bool awdlBlockAckLive(const AirportAWDL::BlockAckRequest &, uint64_t) const;
+    int prepareAWDLBlockAck(const AirportAWDL::BlockAckRequest &, uint64_t &);
+    void requestAWDLBlockAckEnd(uint8_t station, uint8_t tid);
+    bool receiveAWDLBlockAckEnd(const AirportAWDL::BlockAckRequest &, bool requireSession = false);
+    void completeAWDLBlockAckEnd(const AirportAWDL::BlockAckRequest &, uint64_t);
+    int removeAWDLBlockAckTID(unsigned peer, unsigned tid);
+    int removeAWDLBlockAckPeer(unsigned peer);
+    int clearAWDLBlockAck();
+    void resetAWDLBlockAck();
+    void serviceAWDLBlockAck();
+    bool awdlRXBAOwned(const struct iwx_rxba_data *) const;
+    bool receiveAWDLReordered(mbuf_t, struct iwx_rx_mpdu_desc *, struct mbuf_list *);
+    void deliverAWDLReordered(mbuf_t, bool deaggregated);
+#if DEBUG
+    IwxAWDLBroadcastReports awdlBroadcastReports = {};
+    uint64_t awdlCompareEndUS = 0, awdlCompareArmSubmitted[2] = {}, awdlCompareBTOverrides = 0;
+    uint8_t awdlCompareArm() const;
+    bool awdlReceiveAllData = false, awdlReceiveFilterKnown = false;
+    int awdlReceiveFilterCommandError = 0;
+    IOReturn awdlReceiveFilterCleanupResult = kIOReturnSuccess;
+#endif
+    uint64_t awdlNonAPDataDropped = 0;
+    uint8_t awdlMinRateMbps = 12;
+    uint64_t awdlRateSerial = 0;
+    uint64_t awdlRateSamples = 0, awdlRateIgnored = 0, awdlRateProbes = 0;
+    uint64_t awdlRateRaised = 0, awdlRateLowered = 0;
+    uint32_t awdlRateLastFlags = 0;
+    uint16_t awdlRateLastMediaUS = 0;
+    uint8_t awdlRateLastRetries = 0;
+    IwxReceiveClock awdlReceiveClock = {};
+    void *awdlReceiver;
+    void (*awdlInput)(void *, const AirportAWDL::DataView &);
+    void (*awdlActionInput)(void *, const uint8_t *, size_t, uint16_t, int16_t, uint64_t);
+    void (*awdlBlockAckInput)(void *, const AirportAWDL::BlockAckRequest &) = nullptr;
+    void (*awdlBlockAckEndInput)(void *, const AirportAWDL::BlockAckRequest &) = nullptr;
+    void (*awdlAvailabilityChanged)(void *);
+    void (*awdlRegulatoryChanged)(void *) = nullptr;
+    void (*awdlTxComplete)(void *, uint64_t, bool);
+    void (*awdlTxFlushed)(void *, uint64_t) = nullptr;
+    void (*awdlDataComplete)(void *, uint64_t, int) = nullptr;
+    void completeAWDLTx(struct iwx_tx_data *, bool acknowledged, bool flushed = false);
+    void sampleAWDLRate(struct iwx_softc *, struct iwx_rx_packet *, struct iwx_tx_data *);
+    int startAWDLRadio(const uint8_t address[6]);
+    int stopAWDLRadio();
+    void resetAWDLRadio();
+    bool awdlTxWindowOpen() const;
+    int transmitAWDL(mbuf_t packet, uint64_t token = 0, uint64_t deadlineUS = 0);
+    int awdlBinding(bool add);
+    int awdlMAC(uint32_t action, bool receiveAllData = false);
+    int awdlRemoveQueue();
+    bool awdlChannelAllowed(uint32_t channel, uint8_t widthMHz = 20) const;
+    bool awdlWideChannelAllowed(uint32_t channel) const;
+    int awdlPHY(uint16_t channel, uint8_t widthMHz = 20);
+    int finishAWDLDwell();
+    int prepareAWDLListener(uint16_t channel, uint8_t widthMHz = 20);
+    int closeAWDLListenerWindow();
+    int serviceAWDLListener(uint16_t channel, uint64_t windowEndUS, AirportAWDL::RadioState::GrantPolicy policy);
+    int serviceAWDLChannel(uint16_t channel, uint64_t windowEndUS, AirportAWDL::RadioState::GrantPolicy policy = {});
+    void receiveAWDLSession(const struct iwx_rx_packet *);
 #endif
     
     static bool intrFilter(OSObject *object, IOFilterInterruptEventSource *src);
@@ -186,6 +307,8 @@ public:
     
     //driver controller
     virtual void clearScanningFlags() override;
+
+    virtual void abortScanning() override;
     
     virtual IOReturn setMulticastList(IOEthernetAddress *addr, int count) override;
     
@@ -234,7 +357,7 @@ public:
     int    iwx_write_mem(struct iwx_softc *, uint32_t, const void *, int);
     int    iwx_write_mem32(struct iwx_softc *, uint32_t, uint32_t);
     int    iwx_poll_bit(struct iwx_softc *, int, uint32_t, uint32_t, int);
-    int    iwx_nic_lock(struct iwx_softc *);
+    int    iwx_nic_lock(struct iwx_softc *, int timeoutUS = 150000);
     void    iwx_nic_assert_locked(struct iwx_softc *);
     void    iwx_nic_unlock(struct iwx_softc *);
     void    iwx_set_bits_mask_prph(struct iwx_softc *, uint32_t, uint32_t,
@@ -275,9 +398,16 @@ public:
     int    iwx_nic_rx_init(struct iwx_softc *);
     int    iwx_nic_init(struct iwx_softc *);
     int    iwx_enable_txq(struct iwx_softc *, int, int, int, int);
-    int     iwx_tvqm_alloc_txq(struct iwx_softc *, int, int);
-    int     iwx_tvqm_enable_txq(struct iwx_softc *, int, int, uint32_t);
+    int     iwx_tvqm_alloc_txq(struct iwx_softc *, int, int, IwxTxQueueSetup *result = nullptr);
+    int     iwx_tvqm_enable_txq(struct iwx_softc *, int, int, uint32_t, uint8_t station = IWX_STATION_ID,
+                              IwxTxQueueSetup *result = nullptr);
+    void    iwx_free_sta_tx_queues(struct iwx_softc *);
     void    iwx_post_alive(struct iwx_softc *);
+    IwxTimeEventState infraTimeEvent = {};
+    void iwx_sync_time_event_flags(struct iwx_softc *);
+    void iwx_rx_time_event_response(struct iwx_softc *, const struct iwx_rx_packet *);
+    void iwx_rx_time_event_notification(struct iwx_softc *, const struct iwx_rx_packet *);
+    void iwx_rx_session_protection(struct iwx_softc *, const struct iwx_rx_packet *);
     int iwx_send_time_event_cmd(struct iwx_softc *sc,
                             const struct iwx_time_event_cmd *cmd);
     void    iwx_protect_session(struct iwx_softc *, struct iwx_node *, uint32_t,
@@ -295,6 +425,8 @@ public:
     int    iwx_mimo_enabled(struct iwx_softc *);
     static void    iwx_mac_ctxt_task(void *);
     static void    iwx_chan_ctxt_task(void *);
+    static void    iwx_mcc_task(void *);
+    void iwx_publish_regulatory(struct iwx_softc *);
     static void    iwx_updateprot(struct ieee80211com *);
     static void    iwx_updateslot(struct ieee80211com *);
     static void    iwx_updateedca(struct ieee80211com *);
@@ -372,11 +504,13 @@ public:
     void    iwx_cmd_done(struct iwx_softc *, int, int, int);
     const struct iwx_rate *iwx_tx_fill_cmd(struct iwx_softc *, struct iwx_node *,
             struct ieee80211_frame *, uint32_t *, uint32_t *);
+    const struct iwx_rate *iwx_tx_fill_awdl_cmd(struct iwx_softc *, uint32_t *, uint8_t compareAntenna = 0,
+                                             uint8_t selectedRate = 0);
     uint32_t iwx_get_tx_ant(struct iwx_softc *sc, struct ieee80211_node *ni,
                             const struct iwx_rate *rinfo, int type, struct ieee80211_frame *wh);
     void    iwx_toggle_tx_ant(struct iwx_softc *sc, uint8_t *ant);
     void    iwx_tx_update_byte_tbl(struct iwx_softc *, struct iwx_tx_ring *, int, uint16_t, uint16_t);
-    int    iwx_tx(struct iwx_softc *, mbuf_t, struct ieee80211_node *, int);
+    int    iwx_tx(struct iwx_softc *, mbuf_t, struct ieee80211_node *, int, int rawQueue = -1, uint64_t awdlToken = 0, uint64_t coexToken = 0, uint64_t awdlDeadlineUS = 0);
     int    iwx_flush_sta_tids(struct iwx_softc *, int, uint16_t);
     int    iwx_flush_sta(struct iwx_softc *, struct iwx_node *);
     int    iwx_drain_sta(struct iwx_softc *sc, struct iwx_node *, int);
@@ -448,8 +582,18 @@ public:
             struct ieee80211_node *);
     int    iwx_sf_config(struct iwx_softc *, int);
     int    iwx_send_bt_init_conf(struct iwx_softc *);
+    void   iwx_bt_coex_link(struct iwx_softc *, bool);
+    void   iwx_bt_coex_request(struct iwx_softc *);
+    bool   iwx_bt_coex_phy_chains(struct iwx_softc *, const struct iwx_phy_ctxt *, uint8_t *, uint8_t *);
+    int    iwx_bt_coex_send_smps(struct iwx_softc *, struct ieee80211_node *, IwxBTPolicy::SMPS, uint64_t);
+    void   iwx_bt_coex_complete_tx(struct iwx_softc *, struct iwx_tx_data *, bool);
+    void   iwx_bt_coex_service(struct iwx_softc *);
+    static void iwx_bt_coex_task(void *);
+    void   iwx_bt_coex_statistics(struct iwx_softc *, const struct iwx_rx_packet *);
+    int    iwx_bt_coex_update_ci(struct iwx_softc *, bool associated);
+    void   iwx_rx_bt_coex_profile(struct iwx_softc *, const struct iwx_rx_packet *);
     int    iwx_send_soc_conf(struct iwx_softc *);
-    int    iwx_send_update_mcc_cmd(struct iwx_softc *, const char *);
+    int    iwx_send_update_mcc_cmd(struct iwx_softc *, const char *, uint8_t source = 0xff);
     int    iwx_send_temp_report_ths_cmd(struct iwx_softc *);
     int    iwx_init_hw(struct iwx_softc *);
     int    iwx_init(struct _ifnet *);

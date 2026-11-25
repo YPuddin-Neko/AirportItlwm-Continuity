@@ -22,6 +22,10 @@ class AirportItlwmEthernetInterface : public IOEthernetInterface {
     OSDeclareDefaultStructors(AirportItlwmEthernetInterface)
     
 public:
+    const char *getNamePrefix() const override;
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    SInt32 performCommand(IONetworkController *, unsigned long, void *, void *) override;
+#endif
     virtual IOReturn attachToDataLinkLayer( IOOptionBits options,
                                             void *       parameter ) override;
     
@@ -47,7 +51,14 @@ public:
     virtual IOService * getProvider( void ) const override;
     
 private:
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    static IOReturn syncAWDLFlagsGated(OSObject *, void *, void *, void *, void *);
+    static IOReturn syncAWDLMulticastGated(OSObject *, void *, void *, void *, void *);
+#endif
 #ifdef AIRPORT_WCL
+    bool initIfnetParams(struct ifnet_init_params *) override;
+    UInt8 awdlIfnetIdentity[4 + kIOEthernetAddressSize];
+    UInt8 llwIfnetIdentity[4 + kIOEthernetAddressSize];
     static IOReturn prepareBSDGated(OSObject *, void *, void *, void *, void *);
 #endif
     IO80211SkywalkInterface *interface;

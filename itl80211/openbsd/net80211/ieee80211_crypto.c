@@ -218,7 +218,9 @@ ieee80211_get_txkey(struct ieee80211com *ic, const struct ieee80211_frame *wh,
         return &ni->ni_pairwise_key;
 
     /* All other cases (including WEP) use a group key. */
-    if (ni->ni_flags & IEEE80211_NODE_MFP)
+    if ((ni->ni_flags & IEEE80211_NODE_MFP) &&
+        (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) == IEEE80211_FC0_TYPE_MGT &&
+        IEEE80211_IS_MULTICAST(wh->i_addr1))
         kid = ic->ic_igtk_kid;
     else
         kid = ic->ic_def_txkey;

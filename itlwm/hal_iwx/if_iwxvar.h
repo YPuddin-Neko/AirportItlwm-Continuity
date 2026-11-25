@@ -341,7 +341,14 @@ struct iwx_tx_data {
 #define IWX_TXDATA_FLAG_CMD_IS_NARROW  0x01
 #define IWX_TXDATA_FLAG_CMD_PENDING    0x02
 #define IWX_TXDATA_FLAG_CMD_WAITING    0x04
-    uint8_t type;
+#define IWX_TXDATA_FLAG_AWDL           0x08
+#define IWX_TXDATA_FLAG_COEX           0x10
+#define IWX_TXDATA_FLAG_AWDL_BA        0x20
+    uint64_t awdlToken, coexToken;
+    uint64_t awdlBACookie;
+    uint64_t awdlRateEpoch, awdlRateGrant, awdlRateDeadlineUS;
+    uint8_t awdlRatePeer, awdlRateCode;
+    uint8_t type, awdlAntennaMask;
 };
 
 struct iwx_tx_ring {
@@ -466,6 +473,8 @@ struct iwx_tid_data {
     uint16_t next_reclaimed;
     uint16_t qid;
     uint16_t ssn;
+    uint16_t next_ssn;
+    uint8_t agg_awaiting_resp;
 };
 
 #define    INFSLP    UINT64_MAX
@@ -492,6 +501,7 @@ struct iwl_cfg {
     int uhb_supported;
     uint8_t max_tx_agg_size;
     uint16_t num_rbds;
+    uint8_t non_shared_ant;
 };
 
 /**
@@ -542,6 +552,10 @@ struct iwx_reorder_buf_entry {
     uint32_t rate_n_flags;
     uint32_t device_timestamp;
     struct ieee80211_rxinfo rxi;
+#ifdef AIRPORT_WCL
+    bool awdl_deaggregated;
+    bool awdl_complete;
+#endif
 };
 
 /**
@@ -589,6 +603,7 @@ struct iwx_rxq_dup_data {
 
 struct iwx_ba_task_data {
     uint32_t        start_tidmask;
+    uint32_t        enable_tidmask;
     uint32_t        stop_tidmask;
 };
 
@@ -612,10 +627,13 @@ struct iwx_softc {
     struct iwx_ba_task_data    ba_tx;
     
     struct iwx_tid_data sc_tid_data[IWX_MAX_TID_COUNT + 1];//per tid data + mgmt. Look at %iwx_tid_data.
+    uint16_t sc_tx_agg_tidmask;
 
     /* Task for ERP/HT prot/slot-time/EDCA updates. */
     struct task        mac_ctxt_task;
     struct task        chan_ctxt_task;
+    struct task        mcc_task;
+    struct task        bt_coex_task;
 
 	bus_space_tag_t sc_st;
 	bus_space_handle_t sc_sh;

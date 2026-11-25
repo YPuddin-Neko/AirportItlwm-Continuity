@@ -63,8 +63,7 @@ private:
     ItlDriverInfo *fDriverInfo;
     
 protected:
-    bool fScanResultWrapping;
-    ieee80211_node *fNextNodeToSend;
+    struct ieee80211_scan_cursor scanCursor = {};
 };
 
 

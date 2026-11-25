@@ -398,45 +398,29 @@ m_dup_pkthdr(mbuf_t to, mbuf_t from, int wait)
 static inline mbuf_t
 m_dup_pkt(mbuf_t m0, unsigned int adj, int wait)
 {
-    mbuf_t m;
-    mbuf_dup(m0, wait, &m);
+    if (m0 == NULL)
+        return NULL;
+    if (adj == 0) {
+        mbuf_t m = NULL;
+        if (mbuf_dup(m0, (mbuf_how_t)wait, &m) != 0)
+            return NULL;
+        return m;
+    }
+    const size_t len = mbuf_pkthdr_len(m0);
+    unsigned int maxChunks = 1;
+    mbuf_t m = NULL;
+    if (mbuf_allocpacket((mbuf_how_t)wait, len + adj, &maxChunks, &m) != 0 || m == NULL)
+        return NULL;
+    uint8_t *data = (uint8_t *)mbuf_data(m) + adj;
+    if (mbuf_copydata(m0, 0, len, data) != 0 ||
+        mbuf_copy_pkthdr(m, m0) != 0 ||
+        mbuf_setdata(m, data, len) != 0) {
+        mbuf_freem(m);
+        return NULL;
+    }
+    mbuf_pkthdr_setlen(m, len);
+    mbuf_pkthdr_setheader(m, NULL);
     return m;
-//    mbuf_t m;
-//    int len;
-//
-//    len = mbuf_pkthdr_len(m0) + adj;
-//
-//    IOLog("itlwm: m_dup_pkt start, len=%lu\n", len);
-//
-//    if (len > MAXMCLBYTES) /* XXX */
-//        return (NULL);
-//
-//    mbuf_get((mbuf_how_t)wait, mbuf_type(m0), &m);
-//    if (m == NULL)
-//        return (NULL);
-//
-//    if (m_dup_pkthdr(m, m0, wait) != 0)
-//        goto fail;
-//
-//    if (len > mbuf_get_mhlen()) {
-////        MCLGETI(m, wait, NULL, len);
-//        mbuf_mclget(wait, MBUF_TYPE_DATA, &m);
-//        if (!ISSET(mbuf_flags(m), MBUF_EXT))
-//            goto fail;
-//    }
-//
-//    mbuf_setlen(m, len);
-//    mbuf_pkthdr_setlen(m, len);
-////    m->m_len = m->m_pkthdr.len = len;
-//    mbuf_adj(m, adj);
-//    mbuf_copydata(m0, 0, mbuf_pkthdr_len(m0), mtod(m, caddr_t));
-
-    return (m);
-
-fail:
-    IOLog("itlwm: m_dup_pkt fail!!!!\n");
-    mbuf_freem(m);
-    return (NULL);
 }
 
 int if_input(struct _ifnet *ifq, struct mbuf_list *ml);

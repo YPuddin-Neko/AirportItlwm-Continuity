@@ -118,17 +118,20 @@ find_next_bit(volatile void *p, int max, int b)
 static inline int
 find_last_bit(volatile void *p, int max)
 {
-    int b;
     volatile u_int *ptr = (volatile u_int *)p;
-
-    for (b = max; b > 0; b -= 32) {
-        if (ptr[b >> 5] != 0) {
-            for (;;) {
-                if (ptr[b >> 5] & (1 << (b & 0x1f)))
-                    return b;
-                b--;
-            }
-        }
+    if (max <= 0)
+        return max;
+    int word = (max - 1) >> 5;
+    unsigned int bits = ptr[word];
+    unsigned int tail = max & 31;
+    if (tail)
+        bits &= (1U << tail) - 1;
+    for (;;) {
+        if (bits)
+            return word * 32 + 31 - __builtin_clz(bits);
+        if (word == 0)
+            break;
+        bits = ptr[--word];
     }
     return max;
 }

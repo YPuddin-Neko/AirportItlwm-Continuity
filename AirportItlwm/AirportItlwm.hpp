@@ -256,8 +256,11 @@ public:
     
     //IO80211
     uint8_t power_state;
-    struct ieee80211_node *fNextNodeToSend;
-    bool fScanResultWrapping;
+    struct ieee80211_scan_cursor scanCursor = {};
+    struct apple80211_scan_result scanResult = {};
+#if __IO80211_TARGET < __MAC_12_0
+    uint8_t scanResultIEs[2048];
+#endif
     IOTimerEventSource *scanSource;
     
     u_int32_t current_authtype_lower;

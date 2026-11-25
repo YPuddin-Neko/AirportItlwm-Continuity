@@ -32,6 +32,9 @@
 #include "ItlIwn.hpp"
 
 #include "AirportItlwmEthernetInterface.hpp"
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+#include "AirportItlwmAWDLInterface.hpp"
+#endif
 
 enum
 {
@@ -77,6 +80,27 @@ IOReturn get##REQ(OSObject *object, struct DATA_TYPE *data);
 IOReturn set##REQ(OSObject *object, struct DATA_TYPE *data);
     
 public:
+#if defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    IO80211VirtualInterface *createVirtualInterface(ether_addr *, unsigned) override;
+    SInt32 enableVirtualInterface(IO80211VirtualInterface *) override;
+    SInt32 disableVirtualInterface(IO80211VirtualInterface *) override;
+    bool startAWDLInterface();
+    void stopAWDLInterface();
+    bool startLLWInterface();
+    void stopLLWInterface();
+    bool scheduleLLWRegistration();
+    static IOReturn scheduleLLWRegistrationGated(OSObject *, void *, void *, void *, void *);
+    static void completeLLWRegistrationCall(thread_call_param_t, thread_call_param_t);
+    void completeLLWRegistration();
+    AirportItlwmAWDLInterface *awdlInterface;
+    AirportItlwmEthernetInterface *awdlBSD;
+    bool creatingAWDL, awdlStarted, awdlAttached;
+    AirportItlwmLLWInterface *llwInterface;
+    AirportItlwmEthernetInterface *llwBSD;
+    bool creatingLLW, llwStarted, llwAttached;
+    bool llwRegDeferred, llwRegScheduled, llwStopping;
+    thread_call_t llwRegThreadCall;
+#endif
     virtual bool init(OSDictionary *properties) override;
     virtual void free() override;
     virtual IOService* probe(IOService* provider, SInt32* score) override;
@@ -217,6 +241,7 @@ public:
     void setPowerStateOn(void);
     void unregistPM();
     bool initPCIPowerManagment(IOPCIDevice *provider);
+    void restorePCIPowerState(IOPCIDevice *provider);
 
     FUNC_IOCTL_GET(CARD_CAPABILITIES, apple80211_capability_data)
     FUNC_IOCTL(POWER, apple80211_power_data)

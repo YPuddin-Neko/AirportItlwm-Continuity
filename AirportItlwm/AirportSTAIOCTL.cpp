@@ -480,6 +480,10 @@ getRATE(OSObject *object, struct apple80211_rate_data *rd)
         memset(rd, 0, sizeof(*rd));
         rd->version = APPLE80211_VERSION;
         rd->num_radios = 1;
+        if (ic->ic_bss->ni_txrate_reported) {
+            rd->rate[0] = ic->ic_bss->ni_txrate_kbps / 1000;
+            return kIOReturnSuccess;
+        }
         sgi = ieee80211_node_supports_sgi(ic->ic_bss);
         if (ic->ic_curmode == IEEE80211_MODE_11AC) {
             if (sgi)
@@ -1327,6 +1331,12 @@ IOReturn AirportItlwm::
 setSCAN_REQ(OSObject *object,
                             struct apple80211_scan_data *sd)
 {
+    if (!getWorkLoop()->inGate())
+        return _fCommandGate->runAction(
+            [](OSObject *, void *arg0, void *arg1, void *arg2, void *) -> IOReturn {
+                return static_cast<AirportItlwm *>(arg0)->setSCAN_REQ(static_cast<OSObject *>(arg1), static_cast<apple80211_scan_data *>(arg2));
+            }, this, object, sd);
+
     struct ieee80211com *ic = fHalService->get80211Controller();
 #if 0
     XYLog("%s Type: %u BSS Type: %u PHY Mode: %u Dwell time: %u Rest time: %u Num channels: %u SSID: %s BSSID: %s\n",
@@ -1340,8 +1350,7 @@ setSCAN_REQ(OSObject *object,
           sd->ssid,
           ether_sprintf(sd->bssid.octet));
 #endif
-    if (fScanResultWrapping)
-        return 22;
+    scanCursor = {};
     if (ic->ic_state <= IEEE80211_S_INIT)
         return 22;
     if (sd->scan_type == APPLE80211_SCAN_TYPE_FAST || sd->scan_type == APPLE80211_SCAN_TYPE_PASSIVE) {
@@ -1351,6 +1360,16 @@ setSCAN_REQ(OSObject *object,
         }
         return kIOReturnSuccess;
     }
+#if defined(IO80211FAMILY_V2) && defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    if (ic->ic_state == IEEE80211_S_RUN && awdlInterface &&
+        awdlInterface->continuityMediaActive()) {
+        if (scanSource) {
+            scanSource->setTimeoutMS(10);
+            scanSource->enable();
+        }
+        return kIOReturnSuccess;
+    }
+#endif
     ieee80211_begin_cache_bgscan(&ic->ic_ac.ac_if);
     if (scanSource) {
         scanSource->setTimeoutMS(100);
@@ -1362,6 +1381,12 @@ setSCAN_REQ(OSObject *object,
 IOReturn AirportItlwm::
 setSCAN_REQ_MULTIPLE(OSObject *object, struct apple80211_scan_multiple_data *sd)
 {
+    if (!getWorkLoop()->inGate())
+        return _fCommandGate->runAction(
+            [](OSObject *, void *arg0, void *arg1, void *arg2, void *) -> IOReturn {
+                return static_cast<AirportItlwm *>(arg0)->setSCAN_REQ_MULTIPLE(static_cast<OSObject *>(arg1), static_cast<apple80211_scan_multiple_data *>(arg2));
+            }, this, object, sd);
+
     struct ieee80211com *ic = fHalService->get80211Controller();
 #if 0
     int i;
@@ -1378,10 +1403,19 @@ setSCAN_REQ_MULTIPLE(OSObject *object, struct apple80211_scan_multiple_data *sd)
     for (i = 0; i < sd->ssid_count; i++)
         XYLog("%s index=%d ssid=%s ssid_len=%d\n", __FUNCTION__, i, sd->ssids[i].ssid_bytes, sd->ssids[i].ssid_len);
 #endif
-    if (fScanResultWrapping)
-        return 22;
+    scanCursor = {};
     if (ic->ic_state <= IEEE80211_S_INIT)
         return 22;
+#if defined(IO80211FAMILY_V2) && defined(AIRPORT_WCL) && __IO80211_TARGET == __MAC_15_2
+    if (ic->ic_state == IEEE80211_S_RUN && awdlInterface &&
+        awdlInterface->continuityMediaActive()) {
+        if (scanSource) {
+            scanSource->setTimeoutMS(10);
+            scanSource->enable();
+        }
+        return kIOReturnSuccess;
+    }
+#endif
     ieee80211_begin_cache_bgscan(&ic->ic_ac.ac_if);
     if (scanSource) {
         scanSource->setTimeoutMS(100);
@@ -1393,28 +1427,31 @@ setSCAN_REQ_MULTIPLE(OSObject *object, struct apple80211_scan_multiple_data *sd)
 IOReturn AirportItlwm::
 getSCAN_RESULT(OSObject *object, struct apple80211_scan_result **sr)
 {
+    if (!getWorkLoop()->inGate())
+        return _fCommandGate->runAction(
+            [](OSObject *, void *arg0, void *arg1, void *arg2, void *) -> IOReturn {
+                return static_cast<AirportItlwm *>(arg0)->getSCAN_RESULT(static_cast<OSObject *>(arg1), static_cast<apple80211_scan_result **>(arg2));
+            }, this, object, sr);
+
     struct ieee80211com *ic = fHalService->get80211Controller();
     
-    if (fNextNodeToSend == NULL) {
-        if (fScanResultWrapping) {
-            fScanResultWrapping = false;
-            return 5;
-        } else {
-            fNextNodeToSend = RB_MIN(ieee80211_tree, &ic->ic_tree);
-            if (fNextNodeToSend == NULL)
-                return 12;
-        }
-    }
+    struct ieee80211_node *fNextNodeToSend =
+        ieee80211_scan_next(fHalService->get80211Controller(), &scanCursor);
+    if (!fNextNodeToSend)
+        return 5;
 //    XYLog("%s ni_bssid=%s ni_essid=%s channel=%d flags=%d asr_cap=%d asr_nrates=%d asr_ssid_len=%d asr_ie_len=%d asr_rssi=%d\n", __FUNCTION__, ether_sprintf(fNextNodeToSend->ni_bssid), fNextNodeToSend->ni_essid, ieee80211_chan2ieee(ic, fNextNodeToSend->ni_chan), ieeeChanFlag2apple(fNextNodeToSend->ni_chan->ic_flags), fNextNodeToSend->ni_capinfo, fNextNodeToSend->ni_rates.rs_nrates, fNextNodeToSend->ni_esslen, fNextNodeToSend->ni_rsnie_tlv == NULL ? 0 : fNextNodeToSend->ni_rsnie_tlv_len, fNextNodeToSend->ni_rssi);
-    apple80211_scan_result* result = (apple80211_scan_result* )fNextNodeToSend->verb;
+    apple80211_scan_result *result = &scanResult;
     bzero(result, sizeof(*result));
     result->version = APPLE80211_VERSION;
     if (fNextNodeToSend->ni_rsnie_tlv && fNextNodeToSend->ni_rsnie_tlv_len > 0) {
         result->asr_ie_len = fNextNodeToSend->ni_rsnie_tlv_len;
 #if __IO80211_TARGET < __MAC_12_0
-        result->asr_ie_data = fNextNodeToSend->ni_rsnie_tlv;
+        result->asr_ie_len = MIN(result->asr_ie_len, sizeof(scanResultIEs));
+        memcpy(scanResultIEs, fNextNodeToSend->ni_rsnie_tlv, result->asr_ie_len);
+        result->asr_ie_data = scanResultIEs;
 #else
-        memcpy(result->asr_ie_data, fNextNodeToSend->ni_rsnie_tlv, MIN(result->asr_ie_len, sizeof(result->asr_ie_data)));
+        result->asr_ie_len = MIN(result->asr_ie_len, sizeof(result->asr_ie_data));
+        memcpy(result->asr_ie_data, fNextNodeToSend->ni_rsnie_tlv, result->asr_ie_len);
 #endif
     } else {
         result->asr_ie_len = 0;
@@ -1423,9 +1460,8 @@ getSCAN_RESULT(OSObject *object, struct apple80211_scan_result **sr)
 #endif
     }
     result->asr_beacon_int = fNextNodeToSend->ni_intval;
-    for (int i = 0; i < result->asr_nrates; i++ )
-        result->asr_rates[i] = fNextNodeToSend->ni_rates.rs_rates[i];
-    result->asr_nrates = fNextNodeToSend->ni_rates.rs_nrates;
+    result->asr_nrates = MIN(fNextNodeToSend->ni_rates.rs_nrates, sizeof(result->asr_rates));
+    memcpy(result->asr_rates, fNextNodeToSend->ni_rates.rs_rates, result->asr_nrates);
     result->asr_age = (uint32_t)(airport_up_time() - fNextNodeToSend->ni_age_ts);
     result->asr_cap = fNextNodeToSend->ni_capinfo;
     result->asr_channel.version = APPLE80211_VERSION;
@@ -1444,9 +1480,6 @@ getSCAN_RESULT(OSObject *object, struct apple80211_scan_result **sr)
 
     *sr = result;
     
-    fNextNodeToSend = RB_NEXT(ieee80211_tree, &ic->ic_tree, fNextNodeToSend);
-    if (fNextNodeToSend == NULL)
-        fScanResultWrapping = true;
     return kIOReturnSuccess;
 }
 
