@@ -165,7 +165,7 @@ python3 scripts/run-tests.py --jobs 4
 
 ## English Summary
 
-**AirportItlwm-Continuity** is an Intel Wi-Fi kernel extension (`AirportItlwm_Sequoia.kext`) exclusively for **macOS Sequoia (`15.2` – `15.8.x`, Darwin `24.x`, `x86_64`)** — Continuity private `IO80211Family` vtables are verified on `15.8.1 (24H32)`; macOS 26 Tahoe (`Darwin 25.x`) is not supported built natively on Apple's `IO80211Family` V2 (WCL) and `IOSkywalkFamily` stack without OCLP legacy Wi-Fi downgrades.
+**AirportItlwm-Continuity** is an Intel Wi-Fi kernel extension (`AirportItlwm_Sequoia.kext`) built natively on Apple's `IO80211Family` V2 (WCL) and `IOSkywalkFamily` stack without OCLP legacy Wi-Fi downgrades, targeting **macOS Sequoia (`15.2` – `15.8.x`, Darwin `24.x`, `x86_64`)** (Continuity private `IO80211Family` vtables verified on `15.8.1 / 24H32`; macOS 26 Tahoe `Darwin 25.x` is not supported).
 
 Built on top of [OpenIntelWireless/itlwm](https://github.com/OpenIntelWireless/itlwm) (`zxystd`) and [laobamac/itlwm](https://github.com/laobamac/itlwm) with full upstream Git commit history preserved, it adds:
 - Native **`awdl0` Continuity & low-latency media stack** with single-RF time-event co-scheduling for **AirDrop, Sidecar, FaceTime Continuity Camera, Handoff, and Universal Clipboard** on `hal_iwx` adapters.
