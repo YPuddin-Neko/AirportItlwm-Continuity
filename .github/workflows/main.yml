@@ -47,11 +47,11 @@ jobs:
       - name: Build AirportItlwm_Sequoia.kext (${{ matrix.configuration }})
         run: |
           set -euo pipefail
-          extra_flags=()
           if [ "${{ matrix.configuration }}" = "Debug" ]; then
-            extra_flags+=(--check-shared)
+            python3 scripts/build-sequoia.py --configuration Debug --jobs 4 --check-shared
+          else
+            python3 scripts/build-sequoia.py --configuration Release --jobs 4
           fi
-          python3 scripts/build-sequoia.py --configuration "${{ matrix.configuration }}" --jobs 4 "${extra_flags[@]}"
       - name: Package kernel extension
         run: |
           set -euo pipefail

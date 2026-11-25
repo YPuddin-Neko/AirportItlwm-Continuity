@@ -1,11 +1,11 @@
 # AirportItlwm-Continuity
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/macOS-Sequoia%2015.2%2B%20(x86__64)-black)](https://github.com/YPuddin-Neko/AirportItlwm-Continuity)
+[![Platform](https://img.shields.io/badge/macOS-Sequoia%2015.2--15.8%20(x86__64)-black)](https://github.com/YPuddin-Neko/AirportItlwm-Continuity)
 [![Build & Test](https://github.com/YPuddin-Neko/AirportItlwm-Continuity/actions/workflows/main.yml/badge.svg)](https://github.com/YPuddin-Neko/AirportItlwm-Continuity/actions/workflows/main.yml)
 [![Release](https://img.shields.io/github/v/release/YPuddin-Neko/AirportItlwm-Continuity?include_prereleases&label=Release)](https://github.com/YPuddin-Neko/AirportItlwm-Continuity/releases)
 
-适用于 **macOS Sequoia (`15.2+`)** 的 Intel 无线网卡内核扩展驱动（`AirportItlwm_Sequoia.kext`）。本项目直接运行在原生 Sequoia `IO80211Family` V2 / WCL 与 `IOSkywalkFamily` 协议栈之上（无需使用 OCLP 回退旧版 Broadcom Wi-Fi 框架），重点补齐了 **AWDL / LLW 连续互通子系统**（隔空投送、随航、FaceTime 连续互通相机、接力、通用剪贴板），并针对单射频 Intel 网卡的基础设施 Wi-Fi 吞吐、队列延迟及隐藏热点接入进行了深度修复。
+专用于 **macOS Sequoia (`15.2` – `15.8.x`，Darwin `24.x`)** 的 Intel 无线网卡内核扩展驱动（`AirportItlwm_Sequoia.kext`）。本项目直接运行在原生 Sequoia `IO80211Family` V2 / WCL 与 `IOSkywalkFamily` 协议栈之上（无需使用 OCLP 回退旧版 Broadcom Wi-Fi 框架），重点补齐了 **AWDL / LLW 连续互通子系统**（隔空投送、随航、FaceTime 连续互通相机、接力、通用剪贴板），并针对单射频 Intel 网卡的基础设施 Wi-Fi 吞吐、队列延迟及隐藏热点接入进行了深度修复。
 
 ---
 
@@ -83,7 +83,7 @@ flowchart TD
 
 | 项目 | 说明 |
 |---|---|
-| **操作系统** | macOS Sequoia `15.2` 及以上（`x86_64`，已在 `15.8.1 / 24H32` 实机验证；**请勿**叠加 OCLP 旧版 Wi-Fi 降级补丁） |
+| **操作系统** | **仅限 macOS Sequoia `15.2` – `15.8.x`**（代码硬性校验 `Darwin 24.2+`，**不支持** `15.0/15.1`、`macOS 14` 及更早版本，也**不支持 `macOS 26 Tahoe`**；AWDL 连续互通私有虚表与偏移基于 `15.8.1 (24H32)` 逆向核验，建议使用 `15.8.x`，且**请勿**叠加 OCLP 旧版 Wi-Fi 降级补丁） |
 | **无线网卡** | `hal_iwx` 系列 Intel CNVi / PCIe 网卡（如 `Wireless-AC 9260 / 9462 / 9560`、`Wi-Fi 6 AX200 / AX201 / AX210 / AX211` 等；基准实测硬件为 `Intel Wireless-AC 9560 160MHz` + `QuZ-a0-jf-b0-68.ucode`）。更早期 `iwm` / `iwn` 型号仅保留编译兼容，未逐一实机验证连续互通时序 |
 | **蓝牙配套** | 隔空投送发现、接力与随航握手依赖 BLE 广播，需在 OpenCore 中同时加载正常工作的 Intel 蓝牙驱动（`IntelBluetoothFirmware.kext` + `BlueToolFixup.kext`） |
 | **SMBIOS 与账户** | 随航、接力与 FaceTime 连续互通相机需使用支持对应特性的 Mac SMBIOS 机型并登录有效 Apple ID |
@@ -98,7 +98,8 @@ flowchart TD
    - `BundlePath`: `AirportItlwm_Sequoia.kext`
    - `ExecutablePath`: `Contents/MacOS/AirportItlwm`
    - `PlistPath`: `Contents/Info.plist`
-   - `MinKernel`: `24.0.0`
+   - `MinKernel`: `24.2.0`
+   - `MaxKernel`: `24.99.99`
 3. 确保未同时加载其他版本的 `itlwm.kext` 或 `AirportItlwm.kext`（避免 PCI 设备抢占冲突）。
 4. 保存配置并重启 macOS；若此前更换过无线驱动导致网络服务重复，可运行 `sudo python3 tools/repair-network-service.py` 检查并修复 `en1` 主服务绑定。
 
@@ -164,7 +165,7 @@ python3 scripts/run-tests.py --jobs 4
 
 ## English Summary
 
-**AirportItlwm-Continuity** is an Intel Wi-Fi kernel extension (`AirportItlwm_Sequoia.kext`) for **macOS Sequoia (`15.2+`, `x86_64`)** built natively on Apple's `IO80211Family` V2 (WCL) and `IOSkywalkFamily` stack without OCLP legacy Wi-Fi downgrades.
+**AirportItlwm-Continuity** is an Intel Wi-Fi kernel extension (`AirportItlwm_Sequoia.kext`) exclusively for **macOS Sequoia (`15.2` – `15.8.x`, Darwin `24.x`, `x86_64`)** — Continuity private `IO80211Family` vtables are verified on `15.8.1 (24H32)`; macOS 26 Tahoe (`Darwin 25.x`) is not supported built natively on Apple's `IO80211Family` V2 (WCL) and `IOSkywalkFamily` stack without OCLP legacy Wi-Fi downgrades.
 
 Built on top of [OpenIntelWireless/itlwm](https://github.com/OpenIntelWireless/itlwm) (`zxystd`) and [laobamac/itlwm](https://github.com/laobamac/itlwm) with full upstream Git commit history preserved, it adds:
 - Native **`awdl0` Continuity & low-latency media stack** with single-RF time-event co-scheduling for **AirDrop, Sidecar, FaceTime Continuity Camera, Handoff, and Universal Clipboard** on `hal_iwx` adapters.
