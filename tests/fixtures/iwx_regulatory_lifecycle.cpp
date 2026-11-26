@@ -72,7 +72,10 @@ static void bootAndNotifications(){
     assert(d.com.sc_ic.ic_channels[48].ic_center_freq1==5250);
     const auto sends=d.sends;d.notify(0x5553,1);d.notify(0x434e,2);assert(d.sends==sends);
     d.worker();assert(d.sends==sends+1&&d.commands.back().source_id==2);
-    assert(le16toh(d.commands.back().mcc)==0x434e&&d.events==2); // Same country still publishes new profile.
+    assert(le16toh(d.commands.back().mcc)==0x434e&&d.events==1&&d.callbacks==1); // Identical profile deduplicated.
+    put32(d.reply.data+20+4*14,1u|8u|128u|256u|512u|1024u); // Same country with changed channel profile.
+    d.notify(0x434e,1);d.worker();
+    assert(le16toh(d.commands.back().mcc)==0x434e&&d.events==2&&d.callbacks==2); // Same country still publishes new profile.
     d.com.sc_ic.ic_state=IEEE80211_S_RUN;d.notify(0x5553,5);assert(!d.com.mcc_task.queued);
     d.com.sc_flags=IWX_FLAG_SHUTDOWN;d.notify(0x5553,2);assert(!d.com.mcc_task.queued);
 }

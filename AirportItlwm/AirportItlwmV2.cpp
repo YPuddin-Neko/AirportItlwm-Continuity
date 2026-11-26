@@ -939,11 +939,14 @@ IOReturn AirportItlwm::setHardwareAddress(const void *addrP, UInt32 addrBytes)
 #endif
     if_setlladdr(&fHalService->get80211Controller()->ic_ac.ac_if, (const UInt8 *)addrP);
 #ifdef AIRPORT_WCL
-    if (ic->ic_if.if_flags & IFF_RUNNING) {
+    IEEE80211_ADDR_COPY(ic->ic_myaddr, address);
+    const bool needsReconfig = (ic->ic_if.if_flags & IFF_RUNNING) && ic->ic_state > IEEE80211_S_SCAN;
+    if (needsReconfig)
         ic->ic_wcl_mac_reconfig = true;
 #else
-    if (fHalService->get80211Controller()->ic_state > IEEE80211_S_INIT) {
+    const bool needsReconfig = fHalService->get80211Controller()->ic_state > IEEE80211_S_INIT;
 #endif
+    if (needsReconfig) {
         fHalService->disable(bsdInterface);
         fHalService->enable(bsdInterface);
     }
@@ -1157,7 +1160,12 @@ getCOUNTRY_CODE(OSObject *object,
     memset(user_override_cc, 0, sizeof(user_override_cc));
     PE_parse_boot_argn("itlwm_cc", user_override_cc, 3);
     /* user_override_cc > firmware_cc > geo_location_cc */
-    strncpy((char*)cd->cc, user_override_cc[0] ? user_override_cc : ((cc_fw[0] == 'Z' && cc_fw[1] == 'Z' && geo_location_cc[0]) ? geo_location_cc : cc_fw), sizeof(cd->cc));
+    const bool fwWorld = !cc_fw || !cc_fw[0] ||
+        (cc_fw[0] == 'Z' && cc_fw[1] == 'Z') ||
+        (cc_fw[0] == '0' && cc_fw[1] == '0');
+    const char *effective = user_override_cc[0] ? user_override_cc :
+        ((fwWorld && geo_location_cc[0]) ? geo_location_cc : (cc_fw ? cc_fw : ""));
+    strncpy((char*)cd->cc, effective, sizeof(cd->cc));
     return kIOReturnSuccess;
 }
 
@@ -1208,17 +1216,15 @@ setPOWER(OSObject *object,
         return kIOReturnError;
     IOLog("itlwm: setPOWER: num_radios[%d]  power_state(0:%u  1:%u  2:%u  3:%u)\n", pd->num_radios, pd->power_state[0], pd->power_state[1], pd->power_state[2], pd->power_state[3]);
     if (pd->num_radios > 0) {
-        bool isRunning = (fHalService->get80211Controller()->ic_ac.ac_if.if_flags & IFF_RUNNING) != 0;
+        const bool isActive = (fHalService->get80211Controller()->ic_ac.ac_if.if_flags & (IFF_UP | IFF_RUNNING)) != 0;
         if (pd->power_state[0] == 0) {
             fHalService->get80211Controller()->ic_wcl_mac_reconfig = false;
-            changePowerStateToPriv(kPowerStateOff);
-            if (fHalService->get80211Controller()->ic_ac.ac_if.if_flags & (IFF_UP | IFF_RUNNING)) {
+            if (isActive) {
                 net80211_ifstats(fHalService->get80211Controller());
                 disableAdapter(bsdInterface);
             }
         } else {
-            changePowerStateToPriv(kPowerStateOn);
-            if (!isRunning)
+            if (!isActive)
                 enableAdapter(bsdInterface);
         }
         power_state = (pd->power_state[0]);

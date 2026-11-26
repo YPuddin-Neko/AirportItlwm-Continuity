@@ -625,7 +625,8 @@ enum {
     kIOReturnBusy = 2,
     kIOReturnUnsupported = 3,
     kIOReturnNoMemory = 4,
-    kIOReturnError = 5
+    kIOReturnError = 5,
+    kIOReturnAborted = 6
 };
 enum {
     IFF_UP = 1,
@@ -642,6 +643,8 @@ enum {
     IEEE80211_F_AUTO_JOIN = 1 << 0,
     IEEE80211_F_PSK = 1 << 1,
     IEEE80211_F_DESBSSID = 1 << 2,
+    IEEE80211_F_ASCAN = 1 << 3,
+    IEEE80211_F_BGSCAN = 1 << 4,
     IEEE80211_WPA_PROTO_WPA1 = 1 << 0,
     IEEE80211_WPA_PROTO_WPA2 = 1 << 1,
     IEEE80211_WPA_AKM_PSK = 1 << 0,
@@ -682,6 +685,8 @@ struct ieee80211com {
     bool ic_wcl_mac_reconfig = false, ic_wcl_enterprise = false;
     bool ic_wcl_join_requested = false, ic_wcl_scan_requested = false;
     uint8_t ic_wcl_join_channel = 0;
+    unsigned ic_wcl_scan_ssid_length = 0;
+    uint8_t ic_wcl_scan_ssid_count = 0;
     uint8_t ic_chan_active[32] = {};
     struct { int ic_flags = 0; } ic_channels[256] = {};
     uint32_t ic_des_esslen = 0;
@@ -732,7 +737,8 @@ struct AirportItlwmSkywalkInterface {
     bool disassocIsVoluntary = false;
     uint32_t current_authtype_lower = 0, current_authtype_upper = 0;
 
-    void leaveWCLNetwork() { hal.ic.ic_state = IEEE80211_S_SCAN; joinPending = false; }
+    void leaveWCLNetwork() { hal.ic.ic_state = IEEE80211_S_INIT; joinPending = false; }
+    void finishWCLScan(IOReturn) { scanPending = false; }
     void clearWCLPMKSA() {}
     IOReturn startWCLJoin(AirportWCL::JoinRequest &join);
 };

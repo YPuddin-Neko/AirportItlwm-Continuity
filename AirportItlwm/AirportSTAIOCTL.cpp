@@ -1281,7 +1281,12 @@ getCOUNTRY_CODE(OSObject *object,
     memset(user_override_cc, 0, sizeof(user_override_cc));
     PE_parse_boot_argn("itlwm_cc", user_override_cc, 3);
     /* user_override_cc > firmware_cc > geo_location_cc */
-    strncpy((char*)cd->cc, user_override_cc[0] ? user_override_cc : ((cc_fw[0] == 'Z' && cc_fw[1] == 'Z' && geo_location_cc[0]) ? geo_location_cc : cc_fw), sizeof(cd->cc));
+    const bool fwWorld = !cc_fw || !cc_fw[0] ||
+        (cc_fw[0] == 'Z' && cc_fw[1] == 'Z') ||
+        (cc_fw[0] == '0' && cc_fw[1] == '0');
+    const char *effective = user_override_cc[0] ? user_override_cc :
+        ((fwWorld && geo_location_cc[0]) ? geo_location_cc : (cc_fw ? cc_fw : ""));
+    strncpy((char*)cd->cc, effective, sizeof(cd->cc));
     return kIOReturnSuccess;
 }
 

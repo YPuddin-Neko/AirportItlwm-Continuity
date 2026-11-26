@@ -36,6 +36,18 @@ void AirportItlwmSkywalkInterface::deferWCLCountryUpdate(bool channelComplete)
     auto queue = instance->getWorkQueue();
     if (wclStopping || !_fCommandGate || !queue)
         return;
+    if (!channelComplete) {
+        apple80211_country_code_data country = {};
+        const char *fwCC = (fHalService && fHalService->getDriverInfo()) ?
+            fHalService->getDriverInfo()->getFirmwareCountryCode() : nullptr;
+        if (instance->getCOUNTRY_CODE(static_cast<OSObject *>(this), &country) == kIOReturnSuccess) {
+            if (!AirportWCL::countryDeduplicatorFor(this).shouldNotify(
+                    reinterpret_cast<const char *>(country.cc), fwCC))
+                return;
+        } else if (AirportWCL::CountryDeduplicator::isWorldCode(fwCC)) {
+            return;
+        }
+    }
     auto update = static_cast<CountryUpdate *>(IOMalloc(sizeof(CountryUpdate)));
     if (!update)
         return;
@@ -294,8 +306,7 @@ IOReturn AirportItlwmSkywalkInterface::beginWCLScan(apple80211ScanRequest *reque
         return kIOReturnBusy;
     auto ic = fHalService->get80211Controller();
     if ((ic->ic_if.if_flags & IFF_UP) &&
-        (ic->ic_wcl_mac_reconfig || !(ic->ic_if.if_flags & IFF_RUNNING) ||
-         ic->ic_state == IEEE80211_S_INIT)) {
+        (ic->ic_wcl_mac_reconfig || !(ic->ic_if.if_flags & IFF_RUNNING))) {
         // Keep the first auto-join scan while firmware applies a private MAC or wakes.
         wclScanRequest = scan;
         scanDeferred = scanPending = true;
@@ -375,7 +386,7 @@ bool AirportItlwmSkywalkInterface::completeWCLScanFromCache(const AirportWCL::Sc
     if (!skipLiveScan && associatedRun) {
         const uint64_t activeGuardRefUS = state.lastStepUS > wclLastLiveBgscanUS ?
             state.lastStepUS : wclLastLiveBgscanUS;
-        const uint64_t cooldownUS = (scan.type == 2) ? 45000000ULL : 8000000ULL;
+        const uint64_t cooldownUS = (scan.type == 2) ? 45000000ULL : 25000000ULL;
         const uint64_t throttleRefUS = (scan.type == 2) ? wclLastLiveBgscanUS : activeGuardRefUS;
         if (AirportWCL::shouldThrottleAssociatedBgscan(
                 throttleRefUS, nowUS, rssiDbm, cooldownUS, -68,
@@ -431,7 +442,8 @@ IOReturn AirportItlwmSkywalkInterface::startWCLScan(const AirportWCL::ScanReques
                 AirportWCL::scanChannelSelected(scan.channels, true, channel))
                 usable = true;
         if (!usable) {
-            if (ic->ic_state == IEEE80211_S_RUN || ic->ic_state == IEEE80211_S_SCAN) {
+            if (ic->ic_state == IEEE80211_S_RUN || ic->ic_state == IEEE80211_S_SCAN ||
+                ic->ic_state == IEEE80211_S_INIT) {
                 wclScanRequest = scan;
                 scanPending = true;
                 scanCompleted = true;
@@ -448,11 +460,8 @@ IOReturn AirportItlwmSkywalkInterface::startWCLScan(const AirportWCL::ScanReques
     scanCompleted = false;
     const bool directed = AirportWCL::hasDirectedSSID(scan);
     const bool activeScan = scan.type != 2 || directed;
-    const bool restartedAbortedScan = AirportWCL::consumeAbortedScanInScanState(this);
-    scanSkipCompletion = !restartedAbortedScan && ic->ic_state == IEEE80211_S_SCAN &&
-        ((activeScan && (scan.ssidLength != 0 || scan.ssidCount != 0)) ||
-         ic->ic_wcl_scan_ssid_length != 0 || ic->ic_wcl_scan_ssid_count != 0 ||
-         ic->ic_des_esslen != 0);
+    AirportWCL::consumeAbortedScanInScanState(this);
+    scanSkipCompletion = false;
     ic->ic_wcl_join_channel = 0;
     ic->ic_wcl_scan_requested = true;
     ic->ic_wcl_scan_active = activeScan;
@@ -489,7 +498,18 @@ IOReturn AirportItlwmSkywalkInterface::startWCLScan(const AirportWCL::ScanReques
             }
         }
 #endif
-    } else if (ic->ic_state != IEEE80211_S_SCAN || restartedAbortedScan) {
+    } else {
+        if (ic->ic_state == IEEE80211_S_SCAN ||
+            (ic->ic_flags & (IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN))) {
+            ic->ic_flags &= ~(IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN);
+#ifdef KERNEL
+            AirportWCL::abortDriverScan(fHalService);
+#endif
+        }
+        if (activeScan)
+            ic->ic_flags |= IEEE80211_F_ASCAN;
+        else
+            ic->ic_flags &= ~IEEE80211_F_ASCAN;
         int error = ic->ic_newstate(ic, IEEE80211_S_SCAN, -1);
         if (error) {
             scanPending = false;
@@ -689,14 +709,33 @@ IOReturn AirportItlwmSkywalkInterface::startWCLJoin(AirportWCL::JoinRequest &joi
         joinTimer->setTimeoutMS(30000);
         return kIOReturnSuccess;
     }
-    if (!supported || !(ic->ic_if.if_flags & IFF_RUNNING) || joinPending || scanPending) {
+    if (!supported || !(ic->ic_if.if_flags & IFF_RUNNING) || joinPending) {
         explicit_bzero(&join, sizeof(join));
         return !supported ? kIOReturnUnsupported : kIOReturnBusy;
+    }
+    bool abortedScan = false;
+    if (scanPending) {
+        ic->ic_flags &= ~(IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN);
+        ic->ic_wcl_scan_requested = false;
+        ic->ic_wcl_scan_ssid_length = 0;
+        ic->ic_wcl_scan_ssid_count = 0;
+#ifdef KERNEL
+        AirportWCL::abortDriverScan(fHalService);
+#endif
+        finishWCLScan(kIOReturnAborted);
+        abortedScan = true;
     }
     const bool leftActiveBss = ic->ic_state == IEEE80211_S_RUN ||
         ic->ic_state == IEEE80211_S_AUTH || ic->ic_state == IEEE80211_S_ASSOC;
     if (leftActiveBss)
         leaveWCLNetwork();
+    else if (!abortedScan && (ic->ic_state == IEEE80211_S_SCAN ||
+             (ic->ic_flags & (IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN)))) {
+        ic->ic_flags &= ~(IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN);
+#ifdef KERNEL
+        AirportWCL::abortDriverScan(fHalService);
+#endif
+    }
     ieee80211_disable_rsn(ic);
     ieee80211_disable_wep(ic);
     explicit_bzero(ic->ic_psk, sizeof(ic->ic_psk));
@@ -782,9 +821,9 @@ IOReturn AirportItlwmSkywalkInterface::startWCLJoin(AirportWCL::JoinRequest &joi
     bzero(wclBeaconInfo, sizeof(wclBeaconInfo));
     disassocIsVoluntary = false;
     joinTimer->setTimeoutMS(30000);
-    const bool restartedAbortedScan = AirportWCL::consumeAbortedScanInScanState(this);
-    if (!leftActiveBss && (ic->ic_state != IEEE80211_S_SCAN || restartedAbortedScan) &&
-        ic->ic_newstate && ic->ic_newstate(ic, IEEE80211_S_SCAN, -1)) {
+    ic->ic_flags |= IEEE80211_F_ASCAN;
+    AirportWCL::consumeAbortedScanInScanState(this);
+    if (ic->ic_newstate && ic->ic_newstate(ic, IEEE80211_S_SCAN, -1)) {
         joinPending = false;
         joinTimer->cancelTimeout();
         ic->ic_wcl_join_requested = false;
@@ -878,7 +917,8 @@ IOReturn AirportItlwmSkywalkInterface::leaveWCLNetwork()
     ic->ic_wcl_join_requested = false;
     ic->ic_wcl_join_channel = 0;
     ic->ic_wcl_scan_requested = false;
-    if (ic->ic_flags & (IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN)) {
+    if (ic->ic_state == IEEE80211_S_SCAN ||
+        (ic->ic_flags & (IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN))) {
         ic->ic_flags &= ~(IEEE80211_F_BGSCAN | IEEE80211_F_ASCAN);
 #ifdef KERNEL
         AirportWCL::abortDriverScan(fHalService);
@@ -888,8 +928,8 @@ IOReturn AirportItlwmSkywalkInterface::leaveWCLNetwork()
     wclBssValid = false;
     disassocIsVoluntary = true;
     ic->ic_deauth_reason = IEEE80211_REASON_AUTH_LEAVE;
-    if (ic->ic_state > IEEE80211_S_SCAN)
-        ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+    if (ic->ic_state > IEEE80211_S_INIT)
+        ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
     ieee80211_disable_rsn(ic);
     ieee80211_disable_wep(ic);
     explicit_bzero(ic->ic_psk, sizeof(ic->ic_psk));
@@ -1006,6 +1046,7 @@ void AirportItlwmSkywalkInterface::handleWCLEvent(int code, void *data)
             break;
         case IEEE80211_EVT_DRIVER_RESET_BEGIN: {
             ++wclCountryGeneration;
+            AirportWCL::countryDeduplicatorFor(this).noteDriverReset();
             portAuthorized = false;
             updateWCLLinkQuality(true);
             if (ic->ic_wcl_mac_reconfig) {
@@ -1017,7 +1058,10 @@ void AirportItlwmSkywalkInterface::handleWCLEvent(int code, void *data)
         }
         case IEEE80211_EVT_DRIVER_READY:
         case IEEE80211_EVT_DRIVER_STOPPED: {
-            if (code == IEEE80211_EVT_DRIVER_STOPPED) ++wclCountryGeneration;
+            if (code == IEEE80211_EVT_DRIVER_STOPPED) {
+                ++wclCountryGeneration;
+                AirportWCL::countryDeduplicatorFor(this).noteDriverReset();
+            }
             handleWCLAvailability(code == IEEE80211_EVT_DRIVER_READY);
             break;
         }

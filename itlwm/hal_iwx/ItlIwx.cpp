@@ -9423,6 +9423,13 @@ iwx_umac_scan(struct iwx_softc *sc, int bgscan)
     const uint32_t timeout = bgscan ? htole32(120) : htole32(0);
     const uint32_t maxOut = timeout;
 #endif
+#ifdef AIRPORT_WCL
+    if (!bgscan && !isset(sc->sc_ucode_api, IWX_UCODE_TLV_API_REDUCED_SCAN_CONFIG)) {
+        err = iwx_config_legacy_umac_scan(sc);
+        if (err)
+            return err;
+    }
+#endif
     uint8_t scan_ver = iwx_lookup_cmd_ver(sc, IWX_LONG_GROUP, IWX_SCAN_REQ_UMAC);
     
     if (scan_ver == 12)
@@ -9838,7 +9845,11 @@ iwx_mcc_update(struct iwx_softc *sc, struct iwx_mcc_chub_notif *notif)
     // Intel ignores Wi-Fi-originated country changes while associated.
     if (sc->sc_ic.ic_state == IEEE80211_S_RUN && notif->source_id == IWX_MCC_SOURCE_WIFI)
         return;
-    regulatory.requestedMCC = le16toh(notif->mcc);
+    const uint16_t mcc = le16toh(notif->mcc);
+    if (regulatory.valid && !regulatory.pending && !regulatory.running &&
+        mcc == regulatory.mappedMCC && notif->source_id == regulatory.mappedSource)
+        return;
+    regulatory.requestedMCC = mcc;
     regulatory.requestedSource = notif->source_id;
     regulatory.pending = true;
     ++regulatory.serial;
@@ -10332,10 +10343,10 @@ iwx_scan(struct iwx_softc *sc)
     struct _ifnet *ifp = IC2IFP(ic);
     int err;
     
-    if (sc->sc_flags & IWX_FLAG_BGSCAN) {
+    if (sc->sc_flags & (IWX_FLAG_BGSCAN | IWX_FLAG_SCANNING)) {
         err = iwx_scan_abort(sc);
         if (err) {
-            XYLog("%s: could not abort background scan\n",
+            XYLog("%s: could not abort active scan\n",
                   DEVNAME(sc));
             return err;
         }
@@ -11776,6 +11787,10 @@ iwx_endscan(struct iwx_softc *sc)
     
     sc->sc_flags &= ~(IWX_FLAG_SCANNING | IWX_FLAG_BGSCAN);
     ieee80211_end_scan(&ic->ic_if);
+#ifdef AIRPORT_WCL
+    if (ic->ic_state == IEEE80211_S_INIT && sc->ns_nstate == IEEE80211_S_SCAN)
+        sc->ns_nstate = IEEE80211_S_INIT;
+#endif
 }
 
 /*
@@ -12289,7 +12304,13 @@ iwx_send_update_mcc_cmd(struct iwx_softc *sc, const char *alpha2, uint8_t source
     regulatory.lastError = error;
     regulatory.status = profile.status;
     regulatory.responseVersion = advertisedVersion;
+    bool regulatoryChanged = false;
     if (!error) {
+        const bool prevValid = regulatory.valid;
+        const uint16_t prevMappedMCC = regulatory.mappedMCC;
+        const uint32_t prevCapabilities = regulatory.capabilities;
+        uint32_t prevRawFlags[256];
+        memcpy(prevRawFlags, regulatory.rawFlags, sizeof(prevRawFlags));
         uint32_t channels[256] = {};
         for (unsigned i = 0; i < profile.count; ++i)
             channels[i] = htole32(profile.channelFlags(i, version));
@@ -12335,14 +12356,17 @@ iwx_send_update_mcc_cmd(struct iwx_softc *sc, const char *alpha2, uint8_t source
         ++regulatory.refreshes;
         sc->sc_fw_mcc_int = htole16(profile.mcc);
         snprintf(sc->sc_fw_mcc, sizeof(sc->sc_fw_mcc), "%c%c", profile.mcc >> 8, profile.mcc & 0xff);
+        regulatoryChanged = !prevValid || profile.mcc != prevMappedMCC ||
+            profile.capabilities != prevCapabilities ||
+            memcmp(regulatory.rawFlags, prevRawFlags, sizeof(prevRawFlags)) != 0;
     }
     iwx_free_resp(sc, &hcmd);
     iwx_publish_regulatory(sc);
 #ifdef AIRPORT_WCL
-    if (!error && awdlRegulatoryChanged) awdlRegulatoryChanged(awdlReceiver);
+    if (!error && regulatoryChanged && awdlRegulatoryChanged) awdlRegulatoryChanged(awdlReceiver);
 #endif
-    // Same country can carry a changed channel profile. Publish only after commit.
-    if (!error && sc->sc_ic.ic_event_handler)
+    // Publish after commit only when the mapped country or channel profile changed.
+    if (!error && regulatoryChanged && sc->sc_ic.ic_event_handler)
         (*sc->sc_ic.ic_event_handler)(&sc->sc_ic, IEEE80211_EVT_COUNTRY_CODE_UPDATE, nullptr);
     return error;
 }
@@ -12601,6 +12625,7 @@ iwx_init(struct _ifnet *ifp)
         return 0;
     }
     
+#ifndef AIRPORT_WCL
     ieee80211_begin_scan(ifp);
     
     /*
@@ -12621,8 +12646,9 @@ iwx_init(struct _ifnet *ifp)
     }
     if (generation != sc->sc_generation)
         return ENXIO;
-
-#ifdef AIRPORT_WCL
+#else
+    ic->ic_state = IEEE80211_S_INIT;
+    sc->ns_nstate = IEEE80211_S_INIT;
     if (ic->ic_event_handler)
         ic->ic_event_handler(ic, IEEE80211_EVT_DRIVER_READY, NULL);
 #endif

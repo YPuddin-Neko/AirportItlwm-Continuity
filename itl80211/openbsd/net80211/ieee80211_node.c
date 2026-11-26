@@ -1476,6 +1476,14 @@ ieee80211_end_scan(struct _ifnet *ifp)
             return;
         }
 #endif
+#ifdef AIRPORT_WCL
+        if (ic->ic_state != IEEE80211_S_RUN && !ic->ic_wcl_join_requested) {
+            ic->ic_flags &= ~IEEE80211_F_ASCAN;
+            ieee80211_reset_scan(ifp);
+            ic->ic_state = IEEE80211_S_INIT;
+            return;
+        }
+#endif
         if (ic->ic_state != IEEE80211_S_RUN) {
             /*
              * Reset the list of channels to scan and scan the next mode

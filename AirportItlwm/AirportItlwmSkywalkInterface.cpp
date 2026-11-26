@@ -784,7 +784,11 @@ setASSOCIATE(struct apple80211_assoc_data *ad)
     if (!ad)
         return kIOReturnError;
     
+#ifdef AIRPORT_WCL
+    if (!(ic->ic_if.if_flags & IFF_RUNNING))
+#else
     if (ic->ic_state < IEEE80211_S_SCAN)
+#endif
         return kIOReturnSuccess;
     
     if (ic->ic_state == IEEE80211_S_ASSOC || ic->ic_state == IEEE80211_S_AUTH)
@@ -812,7 +816,11 @@ setDISASSOCIATE(struct apple80211_disassoc_data *ad)
     XYLog("%s\n", __FUNCTION__);
     struct ieee80211com *ic = fHalService->get80211Controller();
 
+#ifdef AIRPORT_WCL
+    if (!(ic->ic_if.if_flags & IFF_RUNNING))
+#else
     if (ic->ic_state < IEEE80211_S_SCAN)
+#endif
         return kIOReturnSuccess;
     
     if (ic->ic_state > IEEE80211_S_AUTH && ic->ic_bss != NULL)
@@ -830,7 +838,11 @@ setDISASSOCIATE(struct apple80211_disassoc_data *ad)
 #endif
     ic->ic_assoc_status = APPLE80211_STATUS_UNAVAILABLE;
     ic->ic_deauth_reason = APPLE80211_REASON_ASSOC_LEAVING;
+#ifdef AIRPORT_WCL
+    ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
+#else
     ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+#endif
     return kIOReturnSuccess;
 }
 
@@ -1001,7 +1013,11 @@ setSCAN_REQ(struct apple80211_scan_data *sd)
           ether_sprintf(sd->bssid.octet));
 #endif
     scanCursor = {};
+#ifdef AIRPORT_WCL
+    if (!(ic->ic_if.if_flags & IFF_RUNNING))
+#else
     if (ic->ic_state <= IEEE80211_S_INIT)
+#endif
         return 22;
     if (sd->scan_type == APPLE80211_SCAN_TYPE_FAST || sd->scan_type == APPLE80211_SCAN_TYPE_PASSIVE) {
         if (scanSource) {

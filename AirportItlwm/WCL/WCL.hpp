@@ -925,9 +925,62 @@ struct SplitScanBurst {
     }
 };
 
+struct CountryDeduplicator {
+    char lastEffective[3];
+    char lastFirmware[3];
+    bool valid;
+
+    void reset() {
+        memset(lastEffective, 0, sizeof(lastEffective));
+        memset(lastFirmware, 0, sizeof(lastFirmware));
+        valid = false;
+    }
+
+    void noteDriverReset() {
+        // Keep lastEffective across radio toggles/wakes so world '00' scans do not
+        // spam COUNTRY_CODE_CHANGED, while clearing lastFirmware so the next real MCC
+        // regulatory unlock still notifies WCL and AWDL once.
+        lastFirmware[0] = '0';
+        lastFirmware[1] = '0';
+        lastFirmware[2] = '\0';
+    }
+
+    static bool isWorldCode(const char *cc) {
+        return !cc || !cc[0] || !cc[1] ||
+               (cc[0] == '0' && cc[1] == '0') ||
+               (cc[0] == 'Z' && cc[1] == 'Z') ||
+               (cc[0] == 'z' && cc[1] == 'z') ||
+               (cc[0] == 'X' && cc[1] == '0') ||
+               (cc[0] == 'x' && cc[1] == '0');
+    }
+
+    bool shouldNotify(const char *effectiveCC, const char *firmwareCC) {
+        if (isWorldCode(effectiveCC))
+            return false;
+        const char eff0 = effectiveCC[0];
+        const char eff1 = effectiveCC[1];
+        const bool fwWorld = isWorldCode(firmwareCC);
+        const char fw0 = fwWorld ? '0' : firmwareCC[0];
+        const char fw1 = fwWorld ? '0' : firmwareCC[1];
+        const bool effChanged = !valid || lastEffective[0] != eff0 || lastEffective[1] != eff1;
+        const bool fwChanged = !fwWorld && (!valid || lastFirmware[0] != fw0 || lastFirmware[1] != fw1);
+        if (!effChanged && !fwChanged)
+            return false;
+        lastEffective[0] = eff0;
+        lastEffective[1] = eff1;
+        lastEffective[2] = '\0';
+        lastFirmware[0] = fw0;
+        lastFirmware[1] = fw1;
+        lastFirmware[2] = '\0';
+        valid = true;
+        return true;
+    }
+};
+
 struct SplitScanSlot {
     const void *owner;
     SplitScanBurst burst;
+    CountryDeduplicator country;
 };
 
 inline SplitScanSlot *splitScanSlots() {
@@ -935,22 +988,32 @@ inline SplitScanSlot *splitScanSlots() {
     return slots;
 }
 
-inline SplitScanBurst &splitScanBurstFor(const void *owner) {
+inline SplitScanSlot &splitScanSlotFor(const void *owner) {
     SplitScanSlot *slots = splitScanSlots();
     for (unsigned i = 0; i < 4; ++i) {
         if (slots[i].owner == owner)
-            return slots[i].burst;
+            return slots[i];
     }
     for (unsigned i = 0; i < 4; ++i) {
         if (!slots[i].owner) {
             slots[i].owner = owner;
             slots[i].burst.reset();
-            return slots[i].burst;
+            slots[i].country.reset();
+            return slots[i];
         }
     }
     slots[0].owner = owner;
     slots[0].burst.reset();
-    return slots[0].burst;
+    slots[0].country.reset();
+    return slots[0];
+}
+
+inline SplitScanBurst &splitScanBurstFor(const void *owner) {
+    return splitScanSlotFor(owner).burst;
+}
+
+inline CountryDeduplicator &countryDeduplicatorFor(const void *owner) {
+    return splitScanSlotFor(owner).country;
 }
 
 inline void noteAbortedScanInScanState(const void *owner) {
@@ -969,8 +1032,10 @@ inline void resetSplitScanBurst(const void *owner, bool releaseSlot = false) {
     for (unsigned i = 0; i < 4; ++i) {
         if (slots[i].owner == owner) {
             slots[i].burst.reset();
-            if (releaseSlot)
+            if (releaseSlot) {
+                slots[i].country.reset();
                 slots[i].owner = nullptr;
+            }
         }
     }
 }

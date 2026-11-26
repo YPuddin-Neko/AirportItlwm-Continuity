@@ -674,9 +674,9 @@ int main() {
     }
     assert(liveBgscanStarts == 7);
 
-    // 3. Active host scan (scan.type == 1) 9.0 s after burst finish (>= 8.0 s) runs live,
-    //    whereas passive undirected bgscan (scan.type == 2) at +20 s (< 45 s) throttles!
-    fakeClockUS = burstEndUS + 9000000ULL;
+    // 3. Active host scan (scan.type == 1) 26.0 s after burst finish (>= 25.0 s) runs live,
+    //    whereas passive undirected bgscan (scan.type == 2) at +15 s (< 45 s) throttles!
+    fakeClockUS = burstEndUS + 26000000ULL;
     {
         auto activeReq = makeSubset(subsets[0], 1);
         assert(s.beginWCLScan(&activeReq) == kIOReturnSuccess);
@@ -688,7 +688,7 @@ int main() {
     }
     assert(liveBgscanStarts == 8);
 
-    fakeClockUS += 15000000ULL; // +15 s (< 45 s passive cooldown, > 8 s active guard)
+    fakeClockUS += 15000000ULL; // +15 s (< 45 s passive cooldown, < 25 s active guard)
     {
         auto passiveBg = makeSubset(subsets[2], 2);
         assert(s.beginWCLScan(&passiveBg) == kIOReturnSuccess);
@@ -725,8 +725,8 @@ int main() {
     }
     assert(liveBgscanStarts == 9);
 
-    // 3.0 s after bulk traffic ceases (and > 8 s after last live scan), active scan runs live again:
-    fakeClockUS += 10000000ULL;
+    // After bulk traffic ceases (and >= 25 s after last live scan), active scan runs live again:
+    fakeClockUS += 26000000ULL;
     {
         auto idleActive = makeSubset(subsets[0], 1);
         assert(s.beginWCLScan(&idleActive) == kIOReturnSuccess);
@@ -1124,7 +1124,7 @@ int main() {
 
     assert(s.startWCLJoin(join) == kIOReturnSuccess);
     assert(s.hal.drv.abortCalls == abortsBeforeJoin + 1);
-    assert(s.hal.ic.newstateCalls == transitionsBeforeJoin + 1);
+    assert(s.hal.ic.newstateCalls == transitionsBeforeJoin + 2);
     assert(s.hal.ic.ic_state == IEEE80211_S_SCAN);
     assert(!s.portAuthorized && !s.wclRoamLock && s.joinPending);
     assert(s.hal.ic.ic_wcl_join_requested && s.hal.ic.ic_wcl_join_channel == 149);
