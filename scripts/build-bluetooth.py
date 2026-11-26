@@ -140,7 +140,7 @@ def main():
         spec.loader.exec_module(generator)
         generator.process_files(str(source / 'IntelBluetoothFirmware/FwBinary.cpp'),
                                 str(source / 'IntelBluetoothFirmware/fw'))
-    version = '2.7.2' if args.component == 'bluetool' else '2.5.1'
+    version = '2.7.3' if args.component == 'bluetool' else '2.5.1'
     build_version = (version + 'd' + str(args.preview)) if args.preview is not None else version
     identifier = 'as.acidanthera.BlueToolFixup' if args.component == 'bluetool' else 'com.zxystd.IntelBluetoothFirmware'
     flags = [

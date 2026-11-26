@@ -63,8 +63,8 @@ jobs:
           mkdir -p artifacts
           short_sha=$(git rev-parse --short HEAD)
           cfg=$(printf '%s' "${{ matrix.configuration }}" | tr '[:lower:]' '[:upper:]')
-          ditto -c -k --keepParent "build/Sequoia-${{ matrix.configuration }}/AirportItlwm_Sequoia.kext" "artifacts/AirportItlwm-Sequoia-v2.5.0-${cfg}-${short_sha}.zip"
-          ditto -c -k --keepParent "build/bluetooth/products/bluetool/${{ matrix.configuration }}/BlueToolFixup.kext" "artifacts/BlueToolFixup-v2.7.2-${cfg}-${short_sha}.zip"
+          ditto -c -k --keepParent "build/Sequoia-${{ matrix.configuration }}/AirportItlwm_Sequoia.kext" "artifacts/AirportItlwm-Sequoia-v2.5.1-${cfg}-${short_sha}.zip"
+          ditto -c -k --keepParent "build/bluetooth/products/bluetool/${{ matrix.configuration }}/BlueToolFixup.kext" "artifacts/BlueToolFixup-v2.7.3-${cfg}-${short_sha}.zip"
           ditto -c -k --keepParent "build/bluetooth/products/firmware/${{ matrix.configuration }}/IntelBluetoothFirmware.kext" "artifacts/IntelBluetoothFirmware-v2.5.1-${cfg}-${short_sha}.zip"
       - uses: actions/upload-artifact@v4
         with:
