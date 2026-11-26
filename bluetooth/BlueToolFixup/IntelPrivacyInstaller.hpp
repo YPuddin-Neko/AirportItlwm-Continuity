@@ -112,6 +112,34 @@ inline bool layout(const uint8_t *header, size_t size) {
     return seen == 63 && cursor == HeaderSize;
 }
 
+inline uint32_t parseTextSegmentSize(const uint8_t *header, size_t size) {
+    if (!header || size < 32 || read32(header) != 0xfeedfacf ||
+        read32(header + 4) != 0x1000007 || read32(header + 12) != 2)
+        return 0;
+    const uint32_t ncmds = read32(header + 16);
+    const uint32_t sizeofcmds = read32(header + 20);
+    const size_t cmdEnd = 32 + static_cast<size_t>(sizeofcmds);
+    const size_t limit = size < cmdEnd ? size : cmdEnd;
+    size_t cursor = 32;
+    for (uint32_t i = 0; i < ncmds && cursor + 8 <= limit; ++i) {
+        auto c = header + cursor;
+        const uint32_t command = read32(c), length = read32(c + 4);
+        if (length < 8 || (length & 7) || length > limit - cursor)
+            return 0;
+        if (command == 0x19 && length >= 72 && name(c + 8, "__TEXT")) {
+            const uint64_t vmSize = read64(c + 32);
+            const uint64_t fileOffset = read64(c + 40);
+            const uint64_t fileSize = read64(c + 48);
+            if (fileOffset != 0 || vmSize == 0 || vmSize != fileSize ||
+                (vmSize & (PageSize - 1)) || vmSize > 64U * 1024U * 1024U)
+                return 0;
+            return static_cast<uint32_t>(vmSize);
+        }
+        cursor += length;
+    }
+    return 0;
+}
+
 template <typename Hook, typename Guard>
 struct Image {
     const uint8_t *bytes;
@@ -194,6 +222,15 @@ enum class Result : unsigned {
     Complete, Image, Header, Runtime, Helper, Profile, Hook
 };
 
+struct CowReport {
+    Result privacyResult;
+    uint32_t textSize;
+    uint32_t privacyPagesWritten;
+    uint32_t textPagesPatched;
+    uint32_t readFailures;
+    uint32_t writeFailures;
+};
+
 template <typename Hook, typename Guard, typename Read, typename AllowHelper, typename Bind>
 Result prefault(const Image<Hook, Guard> &image, Read read, AllowHelper allowHelper,
                 Bind bind, uint8_t *buffer) {
@@ -214,6 +251,115 @@ Result prefault(const Image<Hook, Guard> &image, Read read, AllowHelper allowHel
     }
     return Result::Complete;
 }
+
+template <typename Hook, typename Guard, typename Read, typename WriteCow, typename PatchTextPage>
+CowReport installCow(const Image<Hook, Guard> &image, bool allowPrivacy,
+                     Read read, WriteCow writeCow, PatchTextPage patchTextPage,
+                     uint8_t *headerBuffer, uint8_t *pageBuffer, uint8_t *verifyBuffer) {
+    CowReport report {Result::Header, 0, 0, 0, 0, 0};
+    if (!headerBuffer || !pageBuffer || !verifyBuffer) {
+        report.privacyResult = Result::Image;
+        return report;
+    }
+    if (!read(0, headerBuffer, PageSize)) {
+        ++report.readFailures;
+        return report;
+    }
+    const uint32_t textSize = parseTextSegmentSize(headerBuffer, PageSize);
+    if (!textSize) return report;
+    report.textSize = textSize;
+
+    // Track pages made private in phase 1 so phase 2 avoids redundant VM_PROT_COPY remaps.
+    uint32_t privatePages[RequiredHooks + 1];
+    size_t privateCount = 0;
+    auto isPrivatePage = [&](uint32_t offset) {
+        for (size_t i = 0; i < privateCount; ++i)
+            if (privatePages[i] == offset) return true;
+        return false;
+    };
+
+    if (allowPrivacy) {
+        if (!image.valid()) {
+            report.privacyResult = Result::Image;
+        } else if (textSize != TextEnd || !read(0, headerBuffer, HeaderSize) ||
+                   !layout(headerBuffer, HeaderSize)) {
+            report.privacyResult = Result::Header;
+        } else if (!read(RuntimeOffset, pageBuffer, RuntimeSize) ||
+                   !zero(pageBuffer, RuntimeSize)) {
+            report.privacyResult = Result::Runtime;
+        } else if (!read(HelperPage, pageBuffer, PageSize) ||
+                   !zero(pageBuffer + (HelperOffset & 0xfff), TextEnd - HelperOffset)) {
+            report.privacyResult = Result::Helper;
+        } else {
+            // Phase 1a: validate every hook page before writing any private page.
+            bool hooksValid = true;
+            for (size_t i = 0; i < image.hookCount; ++i) {
+                const uint32_t page = image.hooks[i].fileOffset & ~0xfffU;
+                bool seen = false;
+                for (size_t j = 0; j < i; ++j)
+                    if ((image.hooks[j].fileOffset & ~0xfffU) == page) seen = true;
+                if (seen) continue;
+                if (!read(page, pageBuffer, PageSize) || !image.pageMatches(page, pageBuffer, false)) {
+                    hooksValid = false;
+                    break;
+                }
+            }
+            if (!hooksValid) {
+                report.privacyResult = Result::Hook;
+            } else {
+                // Phase 1b: commit HelperPage first, then all hook pages into private COW pages.
+                if (!read(HelperPage, pageBuffer, PageSize) ||
+                    !image.apply(HelperPage, pageBuffer, PageSize, true, false, true, false, false) ||
+                    !writeCow(HelperPage, pageBuffer, false) ||
+                    !read(HelperPage, verifyBuffer, PageSize) ||
+                    !image.helperMatches(verifyBuffer)) {
+                    ++report.writeFailures;
+                    report.privacyResult = Result::Helper;
+                } else {
+                    privatePages[privateCount++] = HelperPage;
+                    ++report.privacyPagesWritten;
+                    bool committed = true;
+                    for (size_t i = 0; i < image.hookCount; ++i) {
+                        const uint32_t page = image.hooks[i].fileOffset & ~0xfffU;
+                        bool seen = false;
+                        for (size_t j = 0; j < i; ++j)
+                            if ((image.hooks[j].fileOffset & ~0xfffU) == page) seen = true;
+                        if (seen) continue;
+                        if (!read(page, pageBuffer, PageSize) ||
+                            !image.apply(page, pageBuffer, PageSize, true, true, true, false, false) ||
+                            !writeCow(page, pageBuffer, false) ||
+                            !read(page, verifyBuffer, PageSize) ||
+                            !image.pageMatches(page, verifyBuffer, true)) {
+                            ++report.writeFailures;
+                            committed = false;
+                            break;
+                        }
+                        if (privateCount < RequiredHooks + 1)
+                            privatePages[privateCount++] = page;
+                        ++report.privacyPagesWritten;
+                    }
+                    report.privacyResult = committed ? Result::Complete : Result::Hook;
+                }
+            }
+        }
+    }
+
+    // Phase 2: apply standard/base bluetoothd __TEXT patches into private COW pages only.
+    for (uint32_t offset = 0; offset < textSize; offset += PageSize) {
+        if (!read(offset, pageBuffer, PageSize)) {
+            ++report.readFailures;
+            continue;
+        }
+        if (patchTextPage(pageBuffer, PageSize)) {
+            if (writeCow(offset, pageBuffer, isPrivatePage(offset))) {
+                ++report.textPagesPatched;
+            } else {
+                ++report.writeFailures;
+            }
+        }
+    }
+    return report;
+}
 } // namespace IntelPrivacyInstaller
 
 #ifdef KERNEL
@@ -221,6 +367,7 @@ Result prefault(const Image<Hook, Guard> &image, Read read, AllowHelper allowHel
 #include <Headers/kern_patcher.hpp>
 #include <Headers/kern_util.hpp>
 #include <IOKit/IOLib.h>
+#include <mach/vm_prot.h>
 #include <sys/kauth.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
@@ -234,45 +381,37 @@ static const Image<IntelPrivacyImage::HookPatch, IntelPrivacyImage::Guard> nativ
 static_assert(IntelPrivacyImage::ImageFileOffset == HelperOffset, "helper location");
 static_assert(IntelPrivacyImage::RuntimeVmOffset == RuntimeOffset, "runtime location");
 
+using TextPagePatcher = bool (*)(uint8_t *page, size_t pageSize);
 using GetTaskMap = vm_map_t (*)(task_t);
 using GetMapMin = vm_map_offset_t (*)(vm_map_t);
 using ReadUser = kern_return_t (*)(vm_map_t, vm_map_address_t, const void *, vm_size_t);
+using WriteUser = kern_return_t (*)(vm_map_t, const void *, vm_map_address_t, vm_size_t);
+using VmProtect = kern_return_t (*)(vm_map_t, vm_offset_t, vm_size_t, boolean_t, vm_prot_t);
+using VmMapFlagSetter = void (*)(vm_map_t, boolean_t);
 using GetTaskProc = proc_t (*)(task_t);
 using GetExecVnode = vnode_t (*)(proc_t);
 using GetExecOffset = int64_t (*)(proc_t);
+
 static GetTaskMap getTaskMap;
 static GetMapMin getMapMin;
 static ReadUser readUser;
+static WriteUser writeUser;
+static VmProtect vmProtect;
+static VmMapFlagSetter vmMapSwitchProtect;
+static VmMapFlagSetter vmMapCsEnforcementSet;
+static VmMapFlagSetter vmMapCsDebuggedSet;
 static GetTaskProc getTaskProc;
 static GetExecVnode getExecVnode;
 static GetExecOffset getExecOffset;
+static TextPagePatcher textPagePatcher;
+static bool privacyProfileEnabled;
+static _Atomic(bool) cowEnabled;
 static mach_vm_address_t originalTaskQos;
 static kauth_listener_t execListenerHandle;
 static ThreadLocal<vnode_t, 8> pendingExec;
 
-struct Profile { vnode_t node; uint64_t fileBase; };
-// One system executable is held for the non-unloadable kext's lifetime. Its
-// usecount prevents pointer reuse; no vnode operation uses this reference alone.
-static _Atomic(Profile *) boundProfile;
-struct Probe { vnode_t node; uint64_t fileBase; bool helperAllowed; };
-static ThreadLocal<Probe *, 8> activeProbe;
-
-inline void onPage(vnode_t node, uint64_t fileOffset, const void *data,
-                   int validated, int tainted, int nx) {
-    if (validated != 0xf || tainted || nx) return;
-    auto profile = atomic_load_explicit(&boundProfile, memory_order_acquire);
-    if (profile && profile->node == node && fileOffset >= profile->fileBase) {
-        nativeImage.apply(fileOffset - profile->fileBase,
-            static_cast<uint8_t *>(const_cast<void *>(data)), PageSize,
-            true, true, true, false, false);
-        return;
-    }
-    auto probe = activeProbe.get();
-    if (profile || !probe || !*probe || !(*probe)->helperAllowed ||
-        (*probe)->node != node || fileOffset < (*probe)->fileBase ||
-        fileOffset - (*probe)->fileBase != HelperPage) return;
-    nativeImage.apply(HelperPage, static_cast<uint8_t *>(const_cast<void *>(data)),
-        PageSize, true, false, true, false, false);
+inline bool cowActive() {
+    return atomic_load_explicit(&cowEnabled, memory_order_acquire);
 }
 
 static int execListener(kauth_cred_t, void *, kauth_action_t action,
@@ -296,7 +435,7 @@ static void taskQos(task_t task, thread_t mainThread) {
     if (!pending) return;
     auto node = *pending;
     pendingExec.erase();
-    Result result = Result::Profile;
+    CowReport report {Result::Profile, 0, 0, 0, 0, 0};
     auto process = getTaskProc(task);
     auto actualNode = process ? getExecVnode(process) : nullptr;
     const int64_t offset = process ? getExecOffset(process) : -1;
@@ -308,60 +447,91 @@ static void taskQos(task_t task, thread_t mainThread) {
     // proc_getexecutablevnode returns an iocount, independent of the KAUTH usecount.
     if (actualNode) vnode_put(actualNode);
     if (matches) {
-        auto buffer = static_cast<uint8_t *>(IOMalloc(HeaderSize));
-        auto candidate = static_cast<Profile *>(IOMalloc(sizeof(Profile)));
-        Probe probe {node, static_cast<uint64_t>(offset), false};
-        bool transferred = false;
-        if (buffer && candidate && activeProbe.set(&probe)) {
-            candidate->node = node;
-            candidate->fileBase = static_cast<uint64_t>(offset);
-            result = prefault(nativeImage,
+        auto headerBuffer = static_cast<uint8_t *>(IOMalloc(HeaderSize));
+        auto pageBuffer = static_cast<uint8_t *>(IOMalloc(PageSize));
+        auto verifyBuffer = static_cast<uint8_t *>(IOMalloc(PageSize));
+        if (headerBuffer && pageBuffer && verifyBuffer) {
+            bool cowPrepared = false;
+            auto prepareCow = [&]() {
+                if (cowPrepared) return;
+                // Keep proc->p_csflags untouched; adjust only this process's vm_map flags.
+                vmMapSwitchProtect(map, FALSE);
+                vmMapCsEnforcementSet(map, FALSE);
+                vmMapCsDebuggedSet(map, TRUE);
+                cowPrepared = true;
+            };
+            report = installCow(
+                nativeImage, privacyProfileEnabled,
                 [&](uint32_t address, uint8_t *destination, size_t size) {
+                    if (size > UINT64_MAX - base || address > UINT64_MAX - base - size)
+                        return false;
                     return readUser(map, base + address, destination, size) == KERN_SUCCESS;
                 },
-                [&]() { probe.helperAllowed = true; },
-                [&]() {
-                    Profile *empty = nullptr;
-                    if (atomic_compare_exchange_strong_explicit(&boundProfile, &empty, candidate,
-                        memory_order_acq_rel, memory_order_acquire)) {
-                        transferred = true;
-                        return true;
-                    }
-                    return empty->node == node && empty->fileBase == static_cast<uint64_t>(offset);
-                }, buffer);
-            activeProbe.erase();
+                [&](uint32_t address, const uint8_t *source, bool alreadyPrivate) {
+                    if (PageSize > UINT64_MAX - base || address > UINT64_MAX - base - PageSize)
+                        return false;
+                    prepareCow();
+                    const vm_offset_t pageAddr = static_cast<vm_offset_t>(base + address);
+                    const vm_prot_t writeProt = alreadyPrivate
+                        ? (VM_PROT_READ | VM_PROT_WRITE)
+                        : (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE | VM_PROT_COPY);
+                    if (vmProtect(map, pageAddr, PageSize, FALSE, writeProt) != KERN_SUCCESS)
+                        return false;
+                    const kern_return_t wr = writeUser(map, source, pageAddr, PageSize);
+                    const kern_return_t rx = vmProtect(map, pageAddr, PageSize, FALSE,
+                                                       VM_PROT_READ | VM_PROT_EXECUTE);
+                    return wr == KERN_SUCCESS && rx == KERN_SUCCESS;
+                },
+                [&](uint8_t *page, size_t pageSize) {
+                    return textPagePatcher ? textPagePatcher(page, pageSize) : false;
+                },
+                headerBuffer, pageBuffer, verifyBuffer);
         }
-        if (buffer) IOFree(buffer, HeaderSize);
-        if (candidate && !transferred) IOFree(candidate, sizeof(Profile));
-        if (transferred) node = nullptr;
+        if (verifyBuffer) IOFree(verifyBuffer, PageSize);
+        if (pageBuffer) IOFree(pageBuffer, PageSize);
+        if (headerBuffer) IOFree(headerBuffer, HeaderSize);
     }
     if (node) vnode_rele(node);
-    // This receipt concerns installation. The userspace controller gate alone
-    // enables the cache after checking this process's complete hook markers.
-    SYSLOG("btlfx", "9462 privacy page install %s (%u)",
-        result == Result::Complete ? "complete" : "inactive", static_cast<unsigned>(result));
+    // This receipt concerns per-process COW installation without modifying shared UBC pages.
+    SYSLOG("btlfx", "bluetoothd cow patch privacy=%s(%u) privPages=%u textPages=%u rdErr=%u wrErr=%u",
+        report.privacyResult == Result::Complete ? "complete" : "inactive",
+        static_cast<unsigned>(report.privacyResult),
+        report.privacyPagesWritten, report.textPagesPatched,
+        report.readFailures, report.writeFailures);
 }
 
-inline bool start(KernelPatcher &patcher) {
-    if (!nativeImage.valid()) return false;
+inline bool start(KernelPatcher &patcher, TextPagePatcher pagePatcher, bool enablePrivacy) {
+    if (enablePrivacy && !nativeImage.valid()) return false;
     getTaskMap = reinterpret_cast<GetTaskMap>(patcher.solveSymbol(KernelPatcher::KernelID, "_get_task_map"));
     getMapMin = reinterpret_cast<GetMapMin>(patcher.solveSymbol(KernelPatcher::KernelID, "_get_map_min"));
     readUser = reinterpret_cast<ReadUser>(patcher.solveSymbol(KernelPatcher::KernelID, "_vm_map_read_user"));
+    writeUser = reinterpret_cast<WriteUser>(patcher.solveSymbol(KernelPatcher::KernelID, "_vm_map_write_user"));
+    vmProtect = reinterpret_cast<VmProtect>(patcher.solveSymbol(KernelPatcher::KernelID, "_vm_protect"));
+    vmMapSwitchProtect = reinterpret_cast<VmMapFlagSetter>(patcher.solveSymbol(KernelPatcher::KernelID, "_vm_map_switch_protect"));
+    vmMapCsEnforcementSet = reinterpret_cast<VmMapFlagSetter>(patcher.solveSymbol(KernelPatcher::KernelID, "_vm_map_cs_enforcement_set"));
+    vmMapCsDebuggedSet = reinterpret_cast<VmMapFlagSetter>(patcher.solveSymbol(KernelPatcher::KernelID, "_vm_map_cs_debugged_set"));
     getTaskProc = reinterpret_cast<GetTaskProc>(patcher.solveSymbol(KernelPatcher::KernelID, "_get_bsdtask_info"));
     getExecVnode = reinterpret_cast<GetExecVnode>(patcher.solveSymbol(KernelPatcher::KernelID, "_proc_getexecutablevnode"));
     getExecOffset = reinterpret_cast<GetExecOffset>(patcher.solveSymbol(KernelPatcher::KernelID, "_proc_getexecutableoffset"));
-    if (!getTaskMap || !getMapMin || !readUser || !getTaskProc || !getExecVnode || !getExecOffset ||
+    if (!getTaskMap || !getMapMin || !readUser || !writeUser || !vmProtect ||
+        !vmMapSwitchProtect || !vmMapCsEnforcementSet || !vmMapCsDebuggedSet ||
+        !getTaskProc || !getExecVnode || !getExecOffset ||
         patcher.getError() != KernelPatcher::Error::NoError) {
         patcher.clearError();
         return false;
     }
+    textPagePatcher = pagePatcher;
+    privacyProfileEnabled = enablePrivacy;
     KernelPatcher::RouteRequest route {"_task_set_main_thread_qos", taskQos, originalTaskQos};
     if (!patcher.routeMultipleLong(KernelPatcher::KernelID, &route, 1)) {
         patcher.clearError();
         return false;
     }
     execListenerHandle = kauth_listen_scope(KAUTH_SCOPE_FILEOP, execListener, nullptr);
-    return execListenerHandle != nullptr;
+    if (!execListenerHandle)
+        return false;
+    atomic_store_explicit(&cowEnabled, true, memory_order_release);
+    return true;
 }
 } // namespace IntelPrivacyInstaller
 #endif
