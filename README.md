@@ -7,7 +7,7 @@
 
 专用于 **macOS Sequoia (`15.2` – `15.8.x`，Darwin `24.x`)** 的 Intel 无线与蓝牙连续互通驱动套件：
 - **Wi-Fi 主驱动**：`AirportItlwm_Sequoia.kext`（`2.5.1`）— 直接运行在原生 Sequoia `IO80211Family` V2 / WCL 与 `IOSkywalkFamily` 协议栈之上（无需 OCLP 旧版 Wi-Fi 降级补丁），实现完整的 **AWDL / 低延迟连续互通栈**，并修复单射频网卡吞吐断崖、缓冲膨胀与隐藏网络接入。
-- **蓝牙配套驱动**：`BlueToolFixup.kext`（`2.7.3`）+ `IntelBluetoothFirmware.kext`（`2.5.1`）— 补齐 Intel 蓝牙在 Sequoia 下的标准 HCI 扫描/广播一致性、Apple 同账号设备 BLE 私密随机地址（RPA / IRK）解析、音频时钟同步及 USB 中断队列防竞争补丁，保障隔空投送、随航、FaceTime 连续互通相机与接力的稳定握手。
+- **蓝牙配套驱动**：`BlueToolFixup.kext`（`2.7.4`）+ `IntelBluetoothFirmware.kext`（`2.5.1`）— 补齐 Intel 蓝牙在 Sequoia 下的标准 HCI 扫描/广播一致性、Apple 同账号设备 BLE 私密随机地址（RPA / IRK）解析、音频时钟同步、`bluetoothd` 启动等待超时上限（`8s`）及 USB 中断队列防竞争补丁，保障隔空投送、随航、FaceTime 连续互通相机与接力的稳定握手。
 
 ---
 
@@ -48,7 +48,7 @@
 ### 4. Sequoia 连续互通蓝牙配套增强（`BlueToolFixup` & `IntelBluetoothFirmware`）
 - **标准 HCI 扫描/广播/连接指令族统一**：修复 Sequoia 下 Intel 控制器混用扩展与标准 HCI 谓词引发的 BLE 广播/扫描冲突，并为第三方 USB 蓝牙控制器补齐 LE 广播随机地址编程与默认 `1M PHY` 握手支持。
 - **Apple 同账号设备 BLE 随机地址（RPA / IRK）解析与 APFS SSV 安全修补**：针对 `15.8.1 (24H32)` 原生 `bluetoothd`（内置严格 UUID 与指令上下文签名保护，非目标版本自动安全跳过），在进程启动阶段通过独立私有 COW `vm_map` 内存页注入全部 `bluetoothd` 补丁，彻底不修改 `disk3s4` 共享 UBC 缓存页（避免深度睡眠唤醒后重启 `bluetoothd` 触发 APFS SSV `EBADMSG 94` 校验崩溃），同时保持 `proc->p_csflags` 原样不变。
-- **蓝牙音频时钟修正与 USB 中断完成防竞争**：修正本地音频连接句柄查找偏移，并在 `IntelBluetoothFirmware` 中保证 USB 中断读取边界与完成回调排空后再复用缓冲，消除高频 BLE 交互下的固件断连。
+- **蓝牙音频时钟修正、`IOKitWaitQuiet` 超时保护与 USB 中断完成防竞争**：修正本地音频连接句柄查找偏移，将 `bluetoothd` 启动阶段的 `IOKitWaitQuiet()` 等待上限由 `240s` 收敛为 `8s`（防止无关 IOKit 服务长期阻塞蓝牙初始化），并在 `IntelBluetoothFirmware` 中保证 USB 中断读取边界与完成回调排空后再复用缓冲，消除高频 BLE 交互下的固件断连。
 
 ---
 
@@ -71,7 +71,7 @@ flowchart TD
         HAL["ItlIwx HAL (Station 0 Infra + Station 3/4 AWDL TVQM / RX BA)"]
     end
 
-    subgraph BTKexts["BlueToolFixup (2.7.3) + IntelBluetoothFirmware (2.5.1)"]
+    subgraph BTKexts["BlueToolFixup (2.7.4) + IntelBluetoothFirmware (2.5.1)"]
         BTFIX["Standard HCI + 24H32 IRK/RPA Resolver + AudioClock"]
         BTFW["USB HCI Bounded Read & Firmware Loader"]
     end
@@ -107,9 +107,9 @@ flowchart TD
 
 ## OpenCore 安装步骤
 
-1. 从 [Releases](https://github.com/YPuddin-Neko/AirportItlwm-Continuity/releases) 下载最新 `v2.5.1` 驱动组件包：
+1. 从 [Releases](https://github.com/YPuddin-Neko/AirportItlwm-Continuity/releases) 下载最新 `v2.5.2` 驱动组件包：
    - `AirportItlwm_Sequoia.kext`（`2.5.1`）
-   - `BlueToolFixup.kext`（`2.7.3`）
+   - `BlueToolFixup.kext`（`2.7.4`）
    - `IntelBluetoothFirmware.kext`（`2.5.1`）
 2. 将上述 Kext 放入 `EFI/OC/Kexts/`（确保 `Lilu.kext` 排在 `BlueToolFixup.kext` 之前），并在 `config.plist -> Kernel -> Add` 中按顺序配置：
    - `Lilu.kext`
@@ -142,7 +142,7 @@ python3 scripts/build-bluetooth.py firmware --configuration Release --jobs 4
 
 ### 运行测试套件
 
-仓库内置 81 套基于 AddressSanitizer / UndefinedBehaviorSanitizer 的隔离主机测试套件，覆盖 AWDL 同步与单射频调度、LLW 重排窗口、WCL 隐藏热点状态机、`ItlIwx` 收发路径以及蓝牙 HCI / IRK 地址解析逻辑：
+仓库内置 82 套基于 AddressSanitizer / UndefinedBehaviorSanitizer 的隔离主机测试套件，覆盖 AWDL 同步与单射频调度、LLW 重排窗口、WCL 隐藏热点状态机、`ItlIwx` 收发路径以及蓝牙 HCI / IRK 地址解析逻辑：
 
 ```bash
 python3 scripts/run-tests.py --jobs 4
@@ -163,7 +163,7 @@ python3 scripts/run-tests.py --jobs 4
 ├── itlwm/                     # Intel iwlwifi 固件资源与 hal_iwx 硬件调度层
 ├── scripts/
 │   ├── build-sequoia.py       # AirportItlwm_Sequoia.kext (2.5.1) 构建脚本
-│   ├── build-bluetooth.py     # BlueToolFixup (2.7.3) & IntelBluetoothFirmware (2.5.1) 构建脚本
+│   ├── build-bluetooth.py     # BlueToolFixup (2.7.4) & IntelBluetoothFirmware (2.5.1) 构建脚本
 │   ├── build-intel-privacy.py # 24H32 bluetoothd IRK/RPA 补丁镜像生成器
 │   └── run-tests.py           # 并行隔离单元测试运行器
 ├── tests/                     # Wi-Fi 与蓝牙全量 ASan/UBSan 回归测试套件
@@ -174,10 +174,10 @@ python3 scripts/run-tests.py --jobs 4
 
 ## English Summary
 
-**AirportItlwm-Continuity (`v2.5.1`)** is a native Continuity Wi-Fi and Bluetooth kernel extension suite for **macOS Sequoia (`15.2` – `15.8.x`, Darwin `24.x`, `x86_64`; verified on `15.8.1 / 24H32`, macOS 26 Tahoe not supported)** without OCLP legacy Wi-Fi downgrades:
+**AirportItlwm-Continuity (`v2.5.2`)** is a native Continuity Wi-Fi and Bluetooth kernel extension suite for **macOS Sequoia (`15.2` – `15.8.x`, Darwin `24.x`, `x86_64`; verified on `15.8.1 / 24H32`, macOS 26 Tahoe not supported)** without OCLP legacy Wi-Fi downgrades:
 
 - **`AirportItlwm_Sequoia.kext` (`2.5.1`)**: Built on [OpenIntelWireless/itlwm](https://github.com/OpenIntelWireless/itlwm) and [laobamac/itlwm](https://github.com/laobamac/itlwm), adding native `awdl0` Continuity & low-latency media scheduling (AirDrop, Sidecar, Continuity Camera, Handoff), `100 ms` `Station 0` RX BA reorder aging, strict Skywalk `FQ_CODEL` backpressure, in-place `ETHER_ALIGN` decapsulation, and full 2.4/5 GHz Hidden SSID join support.
-- **`BlueToolFixup.kext` (`2.7.2`) & `IntelBluetoothFirmware.kext` (`2.5.1`)**: Built on [acidanthera/BrcmPatchRAM](https://github.com/acidanthera/BrcmPatchRAM) and [OpenIntelWireless/IntelBluetoothFirmware](https://github.com/OpenIntelWireless/IntelBluetoothFirmware), adding unified Sequoia standard HCI scan/advertising/connection predicates, `24H32` `bluetoothd` RPA/IRK address resolution across sleep/wake, audio clock lookup fixes, and bounded USB HCI interrupt completion draining.
+- **`BlueToolFixup.kext` (`2.7.4`) & `IntelBluetoothFirmware.kext` (`2.5.1`)**: Built on [acidanthera/BrcmPatchRAM](https://github.com/acidanthera/BrcmPatchRAM) and [OpenIntelWireless/IntelBluetoothFirmware](https://github.com/OpenIntelWireless/IntelBluetoothFirmware), adding unified Sequoia standard HCI scan/advertising/connection predicates, `24H32` `bluetoothd` per-process COW RPA/IRK address resolution across sleep/wake, an `8s` `IOKitWaitQuiet` startup wait cap, audio clock lookup fixes, and bounded USB HCI interrupt completion draining.
 
 ---
 

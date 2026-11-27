@@ -140,7 +140,7 @@ def main():
         spec.loader.exec_module(generator)
         generator.process_files(str(source / 'IntelBluetoothFirmware/FwBinary.cpp'),
                                 str(source / 'IntelBluetoothFirmware/fw'))
-    version = '2.7.3' if args.component == 'bluetool' else '2.5.1'
+    version = '2.7.4' if args.component == 'bluetool' else '2.5.1'
     build_version = (version + 'd' + str(args.preview)) if args.preview is not None else version
     identifier = 'as.acidanthera.BlueToolFixup' if args.component == 'bluetool' else 'com.zxystd.IntelBluetoothFirmware'
     flags = [
@@ -210,7 +210,7 @@ __private_extern__ int _kext_apple_cc = __APPLE_CC__;
     properties = plistlib.loads(text.encode())
     properties.update(CFBundleExecutable=target, CFBundleIdentifier=identifier,
                       CFBundleVersion=build_version, CFBundleShortVersionString=version)
-    properties['IntelSequoiaCompatibilityBuild'] = ('9462-24H32-6' if args.component == 'bluetool' else '9462-24H32-1')
+    properties['IntelSequoiaCompatibilityBuild'] = ('9462-24H32-7' if args.component == 'bluetool' else '9462-24H32-1')
     info.write_bytes(plistlib.dumps(properties, sort_keys=False))
     print(bundle)
     print('Build logs:', logs)
