@@ -32,7 +32,7 @@
  static bool shouldPatchBoardId = false;
  static bool shouldPatchAddress = false;
  static bool shouldPatchNvramCheck = false;
-@@ -175,27 +193,95 @@
+@@ -175,27 +193,99 @@
  
  #pragma mark - Kernel patching code
  
@@ -105,6 +105,10 @@
 +            SYSLOG(MODULE_SHORT, "9462 24H32 third-party LE 1M default PHY applied");
 +            patched = true;
 +        }
++        if (IntelStandardHCI::applyIOKitWaitQuietTimeout(data, size)) {
++            SYSLOG(MODULE_SHORT, "24H32 bluetoothd IOKitWaitQuiet timeout capped to 8s");
++            patched = true;
++        }
 +    }
 +    if (searchAndPatch(data, size, path, kVendorCheckOriginal, kVendorCheckPatched))
 +        patched = true;
@@ -136,7 +140,7 @@
  #pragma mark - Patched functions
  
  static void patched_cs_validate_page(vnode_t vp, memory_object_t pager, memory_object_offset_t page_offset, const void *data, int *validated_p, int *tainted_p, int *nx_p) {
-@@ -210,16 +296,9 @@
+@@ -210,16 +300,9 @@
                  searchAndPatch(data, PAGE_SIZE, path, boardIdsWithUSBBluetooth[0], kBoardIdSize, BaseDeviceInfo::get().boardIdentifier, kBoardIdSize);
          }
          else if (strcmp(path + dirLength, "bluetoothd") == 0) {
@@ -156,7 +160,7 @@
          }
      }
  }
-@@ -252,8 +331,17 @@
+@@ -252,8 +335,17 @@
          if (getKernelVersion() <= KernelVersion::Sonoma)
              shouldPatchNvramCheck = checkKernelArgument("-btlfxnvramcheck");
          KernelPatcher::RouteRequest csRoute = KernelPatcher::RouteRequest("_cs_validate_page", patched_cs_validate_page, orig_cs_validate);

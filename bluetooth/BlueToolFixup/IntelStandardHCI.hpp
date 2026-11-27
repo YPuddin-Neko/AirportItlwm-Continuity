@@ -273,4 +273,31 @@ inline bool applyMultiAdvRandomAddress(void *data, size_t size) {
         bytes[MultiAdvRandomAddressPatchOffset + i] = MultiAdvRandomAddressPatched[i];
     return true;
 }
+
+// Cap bluetoothd's startup IOKitWaitQuiet() wait from 240s to 8s so an
+// unrelated busy IOKit service cannot stall Bluetooth initialization across
+// sleep/wake cycles. The return value is discarded immediately after the call.
+static constexpr uint8_t IOKitWaitQuietTimeoutOriginal[] = {
+    0x48, 0x8d, 0xb5, 0x90, 0xfb, 0xff, 0xff,
+    0x48, 0xc7, 0x06, 0xf0, 0x00, 0x00, 0x00,
+    0x48, 0x8b, 0x05, 0xe5, 0xe9, 0x9a, 0x00,
+    0x8b, 0x38,
+    0xe8,
+};
+
+static constexpr uint32_t IOKitWaitQuietTimeoutPage = 0x2c000;
+static constexpr size_t IOKitWaitQuietTimeoutPageOffset = 0xf56;
+static constexpr size_t IOKitWaitQuietTimeoutImmediateOffset = 10;
+static constexpr uint8_t IOKitWaitQuietTimeoutSeconds = 0x08;
+
+inline bool applyIOKitWaitQuietTimeout(void *data, size_t size) {
+    if (!data || size < IOKitWaitQuietTimeoutPageOffset + sizeof(IOKitWaitQuietTimeoutOriginal))
+        return false;
+    auto bytes = static_cast<uint8_t *>(data) + IOKitWaitQuietTimeoutPageOffset;
+    for (size_t i = 0; i < sizeof(IOKitWaitQuietTimeoutOriginal); ++i)
+        if (bytes[i] != IOKitWaitQuietTimeoutOriginal[i])
+            return false;
+    bytes[IOKitWaitQuietTimeoutImmediateOffset] = IOKitWaitQuietTimeoutSeconds;
+    return true;
+}
 } // namespace IntelStandardHCI
